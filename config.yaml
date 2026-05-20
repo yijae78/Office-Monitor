@@ -1,0 +1,28 @@
+camera:
+  id: 0
+  resolution: [1280, 720]
+  backend: "dshow"
+  fallback_ids: [1, 2]
+
+detection:
+  interval_ms: 200
+  score_threshold: 0.5
+  similarity_threshold: 0.4
+  min_consecutive_frames: 3
+  cooldown_seconds: 300
+
+recording:
+  codec: "XVID"
+  fps: 15
+  segment_minutes: 30
+  auto_start: true
+
+storage:
+  data_dir: "C:\\OfficeMonitor"
+  retention_days: 3
+  cleanup_interval_hours: 1
+
+shortcuts:
+  capture: "Ctrl+Shift+C"
+  record_toggle: "Ctrl+R"
+  record_pause: "Ctrl+P"

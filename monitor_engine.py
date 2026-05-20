@@ -1,0 +1,108 @@
+"""카메라 캡처 스레드"""
+
+import cv2
+import time
+import numpy as np
+from PyQt6.QtCore import QThread, pyqtSignal
+
+
+class CameraThread(QThread):
+    """카메라 프레임 캡처 전담 스레드"""
+
+    frame_ready = pyqtSignal(np.ndarray, float)  # frame, timestamp
+    camera_status = pyqtSignal(str, bool)  # message, is_ok
+    camera_info = pyqtSignal(dict)  # 카메라 정보 (해상도, FPS 등)
+
+    def __init__(self, camera_id=0, resolution=(1280, 720), fallback_ids=None):
+        super().__init__()
+        self._camera_id = camera_id
+        self._resolution = resolution
+        self._fallback_ids = fallback_ids or []
+        self._running = False
+        self._cap = None
+        self._actual_fps = 0.0
+
+    def run(self):
+        self._running = True
+        self._cap = self._try_open_camera()
+
+        if self._cap is None:
+            self.camera_status.emit("카메라를 찾을 수 없습니다", False)
+            return
+
+        # 카메라 안정화 (30프레임 건너뛰기)
+        for _ in range(30):
+            if not self._running:
+                return
+            self._cap.read()
+
+        frame_count = 0
+        fps_timer = time.time()
+
+        while self._running:
+            ret, frame = self._cap.read()
+            if not ret:
+                self.camera_status.emit("카메라 프레임 읽기 실패", False)
+                time.sleep(0.5)
+                # 재연결 시도
+                self._cap.release()
+                self._cap = self._try_open_camera()
+                if self._cap is None:
+                    self.camera_status.emit("카메라 재연결 실패", False)
+                    break
+                continue
+
+            timestamp = time.time()
+            self.frame_ready.emit(frame, timestamp)
+
+            # FPS 계산
+            frame_count += 1
+            elapsed = timestamp - fps_timer
+            if elapsed >= 1.0:
+                self._actual_fps = frame_count / elapsed
+                frame_count = 0
+                fps_timer = timestamp
+
+            # CPU 부하 제한 (~30fps)
+            time.sleep(0.01)
+
+        if self._cap:
+            self._cap.release()
+
+    def _try_open_camera(self):
+        """카메라 열기 시도 (메인 ID + 폴백)"""
+        ids_to_try = [self._camera_id] + self._fallback_ids
+
+        for cam_id in ids_to_try:
+            cap = cv2.VideoCapture(cam_id, cv2.CAP_DSHOW)
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._resolution[0])
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._resolution[1])
+
+                ret, frame = cap.read()
+                if ret:
+                    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    info = {
+                        "id": cam_id,
+                        "width": actual_w,
+                        "height": actual_h,
+                        "name": f"Camera {cam_id}",
+                    }
+                    self.camera_info.emit(info)
+                    self.camera_status.emit(
+                        f"Camera {cam_id} 연결됨 ({actual_w}x{actual_h})", True
+                    )
+                    return cap
+
+            cap.release()
+
+        return None
+
+    def stop(self):
+        self._running = False
+        self.wait(3000)
+
+    @property
+    def actual_fps(self):
+        return self._actual_fps
