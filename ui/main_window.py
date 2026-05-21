@@ -72,6 +72,9 @@ class MainWindow(QMainWindow):
         # 녹화 목록 초기 로드
         self._refresh_rec_list()
 
+        # 오늘 방문 기록을 타임라인에 로드
+        self._load_today_timeline()
+
         # 데이터 자동 정리 타이머
         cleanup_hours = self.config.get("storage", {}).get("cleanup_interval_hours", 1)
         self._cleanup_timer = QTimer(self)
@@ -282,9 +285,27 @@ class MainWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setStyleSheet("""
             QScrollArea { border: none; background: transparent; }
             QScrollArea > QWidget > QWidget { background: transparent; }
+            QScrollBar:vertical {
+                width: 8px;
+                background: rgba(255,255,255,0.04);
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255,255,255,0.15);
+                border-radius: 4px;
+                min-height: 30px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(0,168,255,0.3);
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                height: 0; background: transparent;
+            }
         """)
         scroll.viewport().setStyleSheet("background: transparent;")
 
@@ -474,8 +495,9 @@ class MainWindow(QMainWindow):
         self.kpi_faces.set_value(str(len(faces)))
 
     def _on_visit_logged(self, name: str, is_registered: bool):
-        now = datetime.now().strftime("%H:%M")
-        self.timeline.add_visitor(now, name, is_registered=is_registered)
+        if is_registered:
+            now = datetime.now().strftime("%H:%M")
+            self.timeline.add_visitor(now, name, is_registered=True)
         self._update_kpi()
 
         # 토스트 알림
@@ -705,6 +727,21 @@ class MainWindow(QMainWindow):
         self._fps_display = self._frame_count
         self._frame_count = 0
         self.lbl_cam_fps.setText(f"FPS: {self._fps_display}")
+
+    def _load_today_timeline(self):
+        """DB에서 오늘 방문 기록을 타임라인에 로드 (등록된 사람만)"""
+        try:
+            visits = database.get_today_visits() or []
+            for v in reversed(visits):
+                if not v["is_registered"]:
+                    continue
+                ts = v["timestamp"]
+                time_str = ts[11:16] if len(ts) >= 16 else ts
+                name = v["visitor_name"] or "미등록"
+                self.timeline.add_visitor(time_str, name, is_registered=True)
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
     def _update_kpi(self):
         visits = database.get_today_visits()
