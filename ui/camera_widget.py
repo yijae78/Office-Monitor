@@ -42,11 +42,20 @@ class CameraWidget(QWidget):
     def wheelEvent(self, event):
         """Ctrl+휠로 확대/축소"""
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            delta = event.angleDelta().y() / 1200.0
+            delta = event.angleDelta().y() / 600.0
             self.set_zoom(self._zoom + delta)
             event.accept()
         else:
             super().wheelEvent(event)
+
+    def zoom_in(self):
+        self.set_zoom(self._zoom + 0.25)
+
+    def zoom_out(self):
+        self.set_zoom(self._zoom - 0.25)
+
+    def zoom_reset(self):
+        self.set_zoom(1.0)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -63,51 +72,82 @@ class CameraWidget(QWidget):
         painter.end()
 
     def _paint_frame(self, painter: QPainter):
-        """프레임을 위젯 크기에 맞춰 그리기"""
+        """프레임을 위젯 크기에 맞춰 그리기 (줌 시 중앙 크롭)"""
         h, w, ch = self._frame.shape
-        bytes_per_line = ch * w
-        img = QImage(self._frame.data, w, h, bytes_per_line, QImage.Format.Format_BGR888)
-        pixmap = QPixmap.fromImage(img)
 
-        # 줌 적용한 크기 계산
-        scaled_w = int(pixmap.width() * self._zoom)
-        scaled_h = int(pixmap.height() * self._zoom)
+        # 줌 > 1이면 프레임의 중앙 부분만 크롭
+        if self._zoom > 1.0:
+            crop_w = int(w / self._zoom)
+            crop_h = int(h / self._zoom)
+            x1 = (w - crop_w) // 2
+            y1 = (h - crop_h) // 2
+            cropped = self._frame[y1:y1+crop_h, x1:x1+crop_w].copy()
+            frame_to_draw = cropped
+            fh, fw = crop_h, crop_w
+        else:
+            frame_to_draw = self._frame
+            fh, fw = h, w
+
+        bytes_per_line = ch * fw
+        img = QImage(frame_to_draw.data, fw, fh, bytes_per_line, QImage.Format.Format_BGR888)
+        pixmap = QPixmap.fromImage(img)
 
         # 위젯 크기에 맞추되 비율 유지
         widget_rect = self.rect()
         scaled = pixmap.scaled(
-            QSize(scaled_w, scaled_h),
+            widget_rect.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-
-        # 위젯보다 크면 위젯 크기에 맞춤
-        if scaled.width() > widget_rect.width() or scaled.height() > widget_rect.height():
-            scaled = pixmap.scaled(
-                widget_rect.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
 
         # 중앙 배치
         x = (widget_rect.width() - scaled.width()) // 2
         y = (widget_rect.height() - scaled.height()) // 2
         painter.drawPixmap(x, y, scaled)
 
+        # 줌 표시 (1배 이외일 때)
+        if abs(self._zoom - 1.0) > 0.05:
+            painter.setPen(QColor(0, 168, 255))
+            font = QFont("Pretendard Variable", 10)
+            font.setWeight(QFont.Weight.Bold)
+            painter.setFont(font)
+            painter.drawText(x + 8, y + 18, f"×{self._zoom:.1f}")
+
         # 감지 결과 오버레이
         if self._detections:
-            scale_x = scaled.width() / w
-            scale_y = scaled.height() / h
+            # 줌 크롭 오프셋 계산
+            if self._zoom > 1.0:
+                crop_x1 = (w - int(w / self._zoom)) // 2
+                crop_y1 = (h - int(h / self._zoom)) // 2
+                crop_fw = int(w / self._zoom)
+                crop_fh = int(h / self._zoom)
+            else:
+                crop_x1, crop_y1 = 0, 0
+                crop_fw, crop_fh = w, h
+
+            scale_x = scaled.width() / crop_fw
+            scale_y = scaled.height() / crop_fh
             for det in self._detections:
                 bbox = det.get("bbox", [])
                 name = det.get("name", "")
+                is_reg = det.get("is_registered", False)
+                det_type = det.get("type", "face")
                 if len(bbox) == 4:
-                    bx = int(bbox[0] * scale_x) + x
-                    by = int(bbox[1] * scale_y) + y
+                    bx = int((bbox[0] - crop_x1) * scale_x) + x
+                    by = int((bbox[1] - crop_y1) * scale_y) + y
                     bw = int((bbox[2] - bbox[0]) * scale_x)
                     bh = int((bbox[3] - bbox[1]) * scale_y)
 
-                    pen = QPen(QColor(34, 197, 94), 2)
+                    # 등록: 초록, 미등록: 시안, 사람(얼굴 없음): 회색
+                    if is_reg:
+                        color = QColor(34, 197, 94)
+                    elif name == "미등록":
+                        color = QColor(0, 168, 255)
+                    else:
+                        color = QColor(100, 116, 139)
+
+                    line_w = 2 if det_type == "face" else 1
+                    pen = QPen(color, line_w)
                     painter.setPen(pen)
                     painter.drawRect(bx, by, bw, bh)
 
@@ -115,8 +155,12 @@ class CameraWidget(QWidget):
                         font = QFont("Pretendard Variable", 11)
                         font.setWeight(QFont.Weight.Bold)
                         painter.setFont(font)
-                        painter.setPen(QColor(34, 197, 94))
-                        painter.drawText(bx, by - 6, name)
+                        painter.setPen(color)
+                        label = name
+                        track_id = det.get("track_id", -1)
+                        if track_id >= 0:
+                            label = f"[{track_id}] {name}"
+                        painter.drawText(bx, by - 6, label)
 
     def _paint_placeholder(self, painter: QPainter):
         """카메라 미연결 시 플레이스홀더"""

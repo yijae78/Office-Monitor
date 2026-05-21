@@ -28,6 +28,7 @@ def ensure_directories():
         os.path.join(DATA_DIR, "saved", "recordings"),
         os.path.join(DATA_DIR, "data"),
         os.path.join(DATA_DIR, "data", "thumbnails"),
+        os.path.join(DATA_DIR, "data", "pending_faces"),
     ]
     for d in dirs:
         os.makedirs(d, exist_ok=True)

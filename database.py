@@ -64,6 +64,14 @@ def init_db():
             is_registered   INTEGER DEFAULT 0
         );
 
+        CREATE TABLE IF NOT EXISTS pending_faces (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            image_path  TEXT NOT NULL,
+            embedding   BLOB NOT NULL,
+            captured_at TEXT DEFAULT (datetime('now','localtime')),
+            status      TEXT DEFAULT 'pending'
+        );
+
         CREATE TABLE IF NOT EXISTS snapshots (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             file_path   TEXT NOT NULL,
@@ -89,6 +97,11 @@ def init_db():
 
 def add_visitor(name: str) -> int:
     return execute("INSERT INTO visitors (name) VALUES (?)", (name,))
+
+
+def find_visitor_by_name(name: str):
+    """이름으로 기존 방문자 검색 (정확히 일치)"""
+    return execute("SELECT * FROM visitors WHERE name=?", (name,), fetch="one")
 
 
 def get_visitor(visitor_id: int):
@@ -178,6 +191,41 @@ def get_top_visitors(limit: int = 10):
         FROM visit_logs WHERE is_registered=1
         GROUP BY visitor_id ORDER BY visit_count DESC LIMIT ?
     """, (limit,), fetch="all")
+
+
+# ── 미등록 캡처 (pending_faces) ──
+
+def add_pending_face(image_path: str, embedding_bytes: bytes) -> int:
+    return execute(
+        "INSERT INTO pending_faces (image_path, embedding) VALUES (?,?)",
+        (image_path, embedding_bytes))
+
+
+def get_pending_faces(status: str = "pending"):
+    return execute(
+        "SELECT * FROM pending_faces WHERE status=? ORDER BY captured_at DESC",
+        (status,), fetch="all")
+
+
+def get_pending_face(face_id: int):
+    return execute("SELECT * FROM pending_faces WHERE id=?", (face_id,), fetch="one")
+
+
+def soft_delete_pending_face(face_id: int):
+    execute("UPDATE pending_faces SET status='deleted' WHERE id=?", (face_id,))
+
+
+def restore_pending_face(face_id: int):
+    execute("UPDATE pending_faces SET status='pending' WHERE id=?", (face_id,))
+
+
+def hard_delete_pending_face(face_id: int):
+    execute("DELETE FROM pending_faces WHERE id=?", (face_id,))
+
+
+def remove_pending_face(face_id: int):
+    """등록 완료 후 제거"""
+    execute("DELETE FROM pending_faces WHERE id=?", (face_id,))
 
 
 # ── 스냅샷 ──

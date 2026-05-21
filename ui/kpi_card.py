@@ -1,6 +1,6 @@
 """KPI 카드 위젯 — QPainter 기반, 글로우 펄스 애니메이션"""
 
-from PyQt6.QtWidgets import QWidget, QGraphicsDropShadowEffect
+from PyQt6.QtWidgets import QWidget, QGraphicsDropShadowEffect, QSizePolicy
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer, pyqtProperty, QRectF
 from PyQt6.QtGui import QPainter, QColor, QFont, QLinearGradient, QPen
 
@@ -20,8 +20,10 @@ class KPICard(QWidget):
         self._accent = accent
         self._glow_opacity = 0.15
 
-        self.setFixedHeight(100)
-        self.setMinimumWidth(120)
+        self.setMinimumHeight(70)
+        self.setMaximumHeight(100)
+        self.setMinimumWidth(80)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         # 그림자
         shadow = QGraphicsDropShadowEffect(self)
@@ -78,9 +80,13 @@ class KPICard(QWidget):
 
         rect = QRectF(self.rect())
 
-        # 배경
+        # 배경 — 깊은 바다색 그라디언트
+        bg_grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        bg_grad.setColorAt(0.0, QColor(8, 27, 52, 220))     # 심해 네이비
+        bg_grad.setColorAt(0.5, QColor(10, 36, 65, 200))     # 미드나잇 블루
+        bg_grad.setColorAt(1.0, QColor(6, 22, 42, 230))      # 딥 오션
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 10))  # surface-1
+        painter.setBrush(bg_grad)
         painter.drawRoundedRect(rect, RADIUS_LG, RADIUS_LG)
 
         # 보더
@@ -108,25 +114,33 @@ class KPICard(QWidget):
             0, 0,
         )
 
+        # 반응형 폰트/위치 계산
+        h = rect.height()
+        pad = max(8, min(16, rect.width() * 0.08))
+        val_size = max(16, min(28, int(h * 0.35)))
+        lbl_size = max(8, min(10, int(h * 0.12)))
+        val_h = h * 0.5
+        lbl_y = rect.top() + h * 0.6
+
         # 수치
-        font_val = QFont(FONT_UI, 28)
+        font_val = QFont(FONT_UI, val_size)
         font_val.setWeight(QFont.Weight.Bold)
         painter.setFont(font_val)
         painter.setPen(Q_TEXT_PRIMARY)
         painter.drawText(
-            QRectF(rect.left() + 16, rect.top() + 12, rect.width() - 32, 44),
+            QRectF(rect.left() + pad, rect.top() + 8, rect.width() - pad * 2, val_h),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             self._value,
         )
 
         # 라벨
-        font_lbl = QFont(FONT_UI, 10)
+        font_lbl = QFont(FONT_UI, lbl_size)
         font_lbl.setWeight(QFont.Weight.DemiBold)
         font_lbl.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
         painter.setFont(font_lbl)
         painter.setPen(Q_TEXT_SECONDARY)
         painter.drawText(
-            QRectF(rect.left() + 16, rect.top() + 58, rect.width() - 32, 20),
+            QRectF(rect.left() + pad, lbl_y, rect.width() - pad * 2, 20),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             self._label,
         )

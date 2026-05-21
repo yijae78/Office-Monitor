@@ -59,10 +59,10 @@ QPushButton.segmentBtn {
     color: #64748b;
     border: none;
     border-radius: 8px;
-    padding: 6px 18px;
+    padding: 6px 10px;
     font-size: 13px;
     font-weight: bold;
-    min-width: 80px;
+    min-width: 40px;
 }
 QPushButton.segmentBtn:hover {
     color: #94a3b8;

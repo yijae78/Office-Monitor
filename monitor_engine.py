@@ -69,8 +69,22 @@ class CameraThread(QThread):
         if self._cap:
             self._cap.release()
 
+    def _is_real_camera(self, cap):
+        """가상 카메라(화면 캡처 등) 필터링 — 비표준 비율 거부"""
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        # 표준 웹캠 비율 (4:3 또는 16:9 등)이 아니면 가상 카메라
+        if h > 0:
+            ratio = w / h
+            standard_ratios = [4/3, 16/9, 16/10]
+            if not any(abs(ratio - r) < 0.1 for r in standard_ratios):
+                return False
+
+        return True
+
     def _try_open_camera(self):
-        """카메라 열기 시도 (메인 ID + 폴백)"""
+        """카메라 열기 시도 (메인 ID + 폴백, 가상 카메라 제외)"""
         ids_to_try = [self._camera_id] + self._fallback_ids
 
         for cam_id in ids_to_try:
@@ -81,6 +95,13 @@ class CameraThread(QThread):
 
                 ret, frame = cap.read()
                 if ret:
+                    if not self._is_real_camera(cap):
+                        self.camera_status.emit(
+                            f"Camera {cam_id} 건너뜀 (가상 카메라)", False
+                        )
+                        cap.release()
+                        continue
+
                     actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                     actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     info = {
