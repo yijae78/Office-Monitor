@@ -17,7 +17,7 @@ class CameraWidget(QWidget):
         self._status_text = "카메라 연결 대기 중..."
         self._status_ok = False
 
-        self.setMinimumSize(320, 240)
+        self.setMinimumSize(160, 120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
 

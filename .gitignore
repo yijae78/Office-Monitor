@@ -13,3 +13,9 @@ build/
 !assets/*.png
 !assets/*.ico
 C:/OfficeMonitor/
+icon_preview.png
+ico_check.png
+ref_obsidian.png
+ref_paperclip.png
+ref_paperclip.ico
+__pycache__/

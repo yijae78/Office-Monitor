@@ -41,6 +41,12 @@ QLabel#clockLabel {
     font-family: 'JetBrains Mono', 'D2Coding', monospace;
 }
 
+QLabel#dateLabel {
+    font-size: 12px;
+    color: #64748b;
+    font-family: 'Pretendard Variable', 'Segoe UI', sans-serif;
+}
+
 /* ── 세그먼트 컨트롤 ── */
 QWidget#segmentGroup {
     background: rgba(255,255,255,0.04);
@@ -168,6 +174,40 @@ QPushButton#btnPause:hover {
 }
 
 /* ══════════════════════════════════════════
+   패널 토글 버튼
+   ══════════════════════════════════════════ */
+QPushButton#panelToggle {
+    background: rgba(255,255,255,0.04);
+    border: none;
+    border-left: 1px solid rgba(255,255,255,0.08);
+    border-right: 1px solid rgba(255,255,255,0.08);
+    color: #64748b;
+    font-size: 10px;
+    padding: 0;
+    border-radius: 0;
+}
+QPushButton#panelToggle:hover {
+    background: rgba(0,168,255,0.10);
+    color: #00A8FF;
+}
+
+/* ── 상단 패널 토글 ── */
+QPushButton#topPanelToggle {
+    background: rgba(255,255,255,0.04);
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    color: #64748b;
+    font-size: 9px;
+    padding: 0;
+    border-radius: 0;
+}
+QPushButton#topPanelToggle:hover {
+    background: rgba(0,168,255,0.10);
+    color: #00A8FF;
+}
+
+/* ══════════════════════════════════════════
    글래스 카드
    ══════════════════════════════════════════ */
 QFrame#glassCard {
@@ -177,6 +217,21 @@ QFrame#glassCard {
 }
 QFrame#glassCard:hover {
     background: rgba(255,255,255,0.06);
+}
+
+/* ── 접기/펼치기 카드 헤더 ── */
+QPushButton#cardHeader {
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    color: #f1f5f9;
+    font-size: 13px;
+    font-weight: bold;
+    text-align: left;
+    padding: 10px 12px;
+}
+QPushButton#cardHeader:hover {
+    background: rgba(255,255,255,0.04);
 }
 
 /* ══════════════════════════════════════════

@@ -66,7 +66,14 @@ class HeaderBar(QWidget):
 
         layout.addStretch()
 
-        # ── 우측: 설정 + 시계 ──
+        # ── 우측: 날짜 + 설정 + 시계 ──
+        self.date_label = QLabel()
+        self.date_label.setObjectName("dateLabel")
+        self.date_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self.date_label)
+
+        layout.addSpacing(8)
+
         self.btn_settings = QPushButton("⚙")
         self.btn_settings.setObjectName("settingsBtn")
         self.btn_settings.setFixedSize(36, 36)
@@ -93,7 +100,11 @@ class HeaderBar(QWidget):
         self.tab_changed.emit(tab_id)
 
     def _update_clock(self):
-        self.clock_label.setText(datetime.now().strftime("%H:%M:%S"))
+        now = datetime.now()
+        self.clock_label.setText(now.strftime("%H:%M:%S"))
+        weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+        wd = weekdays[now.weekday()]
+        self.date_label.setText(f"{now.strftime('%Y.%m.%d')} ({wd})")
 
     def set_active_tab(self, index: int):
         """외부에서 탭 변경"""
