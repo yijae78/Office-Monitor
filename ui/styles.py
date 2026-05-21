@@ -163,6 +163,22 @@ QPushButton#btnCapture:hover {
     background: rgba(34,197,94,0.18);
 }
 
+/* 줌 버튼 */
+QPushButton#zoomBtn {
+    background: rgba(255,255,255,0.08);
+    color: #f1f5f9;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    padding: 2px 6px;
+    font-size: 15px;
+    font-weight: bold;
+}
+QPushButton#zoomBtn:hover {
+    background: rgba(0,168,255,0.20);
+    color: #38bdf8;
+    border-color: rgba(0,168,255,0.4);
+}
+
 /* 일시정지 버튼 */
 QPushButton#btnPause {
     background: rgba(245,158,11,0.10);

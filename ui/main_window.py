@@ -171,42 +171,27 @@ class MainWindow(QMainWindow):
         self.btn_capture.clicked.connect(self._capture_snapshot)
 
         # 줌 버튼
-        btn_zoom_out = QPushButton("－")
-        btn_zoom_out.setFixedSize(30, 28)
+        btn_zoom_out = QPushButton("-")
+        btn_zoom_out.setObjectName("zoomBtn")
+        btn_zoom_out.setFixedSize(32, 28)
         btn_zoom_out.setToolTip("축소")
-        btn_zoom_out.setStyleSheet("""
-            QPushButton { background: rgba(255,255,255,0.06); color: #94a3b8;
-                border: 1px solid rgba(255,255,255,0.10); border-radius: 6px;
-                font-size: 16px; font-weight: bold; }
-            QPushButton:hover { background: rgba(0,168,255,0.15); color: #38bdf8; }
-        """)
         btn_zoom_out.clicked.connect(lambda: self.camera_widget.zoom_out())
 
         self._lbl_zoom = QLabel("1.0×")
         self._lbl_zoom.setFixedWidth(36)
         self._lbl_zoom.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._lbl_zoom.setStyleSheet("font-size: 10px; color: #64748b;")
+        self._lbl_zoom.setStyleSheet("font-size: 10px; color: #94a3b8;")
 
-        btn_zoom_in = QPushButton("＋")
-        btn_zoom_in.setFixedSize(30, 28)
+        btn_zoom_in = QPushButton("+")
+        btn_zoom_in.setObjectName("zoomBtn")
+        btn_zoom_in.setFixedSize(32, 28)
         btn_zoom_in.setToolTip("확대")
-        btn_zoom_in.setStyleSheet("""
-            QPushButton { background: rgba(255,255,255,0.06); color: #94a3b8;
-                border: 1px solid rgba(255,255,255,0.10); border-radius: 6px;
-                font-size: 16px; font-weight: bold; }
-            QPushButton:hover { background: rgba(0,168,255,0.15); color: #38bdf8; }
-        """)
         btn_zoom_in.clicked.connect(lambda: self.camera_widget.zoom_in())
 
         btn_zoom_reset = QPushButton("1:1")
-        btn_zoom_reset.setFixedSize(32, 28)
+        btn_zoom_reset.setObjectName("zoomBtn")
+        btn_zoom_reset.setFixedSize(36, 28)
         btn_zoom_reset.setToolTip("원본 크기")
-        btn_zoom_reset.setStyleSheet("""
-            QPushButton { background: rgba(255,255,255,0.04); color: #64748b;
-                border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
-                font-size: 10px; }
-            QPushButton:hover { background: rgba(255,255,255,0.08); color: #f1f5f9; }
-        """)
         btn_zoom_reset.clicked.connect(lambda: self.camera_widget.zoom_reset())
 
         tb_layout.addWidget(cam_label)
