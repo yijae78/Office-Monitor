@@ -377,6 +377,103 @@ class RegisteredCard(QFrame):
             self._parent_view.refresh()
 
 
+class RegisteredListCard(QFrame):
+    """등록된 방문자 — 리스트 뷰 카드 (가로 배치)"""
+
+    def __init__(self, visitor_id: int, name: str, thumb_path: str, emb_count: int, parent_view, parent=None):
+        super().__init__(parent)
+        self.visitor_id = visitor_id
+        self.visitor_name = name
+        self._parent_view = parent_view
+        self.setObjectName("glassCard")
+        self.setFixedHeight(72)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(12)
+
+        # 썸네일 (원형)
+        img_label = QLabel()
+        img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        img_label.setFixedSize(52, 52)
+        img_label.setStyleSheet("""
+            border: 2px solid rgba(0,168,255,0.25);
+            border-radius: 26px;
+            background: rgba(0,0,0,0.3);
+        """)
+        if thumb_path and os.path.exists(thumb_path):
+            pixmap = QPixmap(thumb_path).scaled(
+                48, 48,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            img_label.setPixmap(pixmap)
+        else:
+            img_label.setText("👤")
+            img_label.setStyleSheet(img_label.styleSheet() + "font-size: 22px; color: rgba(255,255,255,0.2);")
+        layout.addWidget(img_label)
+
+        # 이름 + 임베딩 수 (세로 배치)
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+
+        name_label = QLabel(name)
+        name_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #00A8FF; background: transparent;")
+        info_layout.addWidget(name_label)
+
+        sub_label = QLabel(f"임베딩 {emb_count}개")
+        sub_label.setStyleSheet("font-size: 11px; color: #64748b; background: transparent;")
+        info_layout.addWidget(sub_label)
+
+        layout.addLayout(info_layout, 1)
+
+        # 편집 버튼
+        btn_edit = QPushButton("편집")
+        btn_edit.setFixedSize(52, 30)
+        btn_edit.setStyleSheet("""
+            QPushButton { background: rgba(59,130,246,0.10); color: #60a5fa;
+                border: 1px solid rgba(59,130,246,0.25); border-radius: 6px;
+                font-size: 11px; font-weight: bold; }
+            QPushButton:hover { background: rgba(59,130,246,0.20); }
+        """)
+        btn_edit.clicked.connect(self._edit)
+        layout.addWidget(btn_edit)
+
+        # 삭제 버튼
+        btn_del = QPushButton("삭제")
+        btn_del.setFixedSize(52, 30)
+        btn_del.setStyleSheet("""
+            QPushButton { background: rgba(239,68,68,0.10); color: #f87171;
+                border: 1px solid rgba(239,68,68,0.25); border-radius: 6px;
+                font-size: 11px; font-weight: bold; }
+            QPushButton:hover { background: rgba(239,68,68,0.20); }
+        """)
+        btn_del.clicked.connect(self._delete)
+        layout.addWidget(btn_del)
+
+    def _edit(self):
+        name, ok = _styled_input(
+            self, "이름 편집", "새 이름을 입력하세요:", text=self.visitor_name)
+        if ok and name.strip() and name.strip() != self.visitor_name:
+            database.update_visitor_name(self.visitor_id, name.strip())
+            det = self._parent_view._main_window._detection_thread
+            if det:
+                det.reload_known_faces()
+            self._parent_view.refresh()
+
+    def _delete(self):
+        reply = QMessageBox.question(
+            self, "삭제 확인", f"'{self.visitor_name}' 방문자를 삭제하시겠습니까?\n(모든 임베딩이 함께 삭제됩니다)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            database.delete_visitor(self.visitor_id)
+            det = self._parent_view._main_window._detection_thread
+            if det:
+                det.reload_known_faces()
+            self._parent_view.refresh()
+
+
 # ═══════════════════════════════════════
 # 메인 뷰
 # ═══════════════════════════════════════
@@ -452,11 +549,55 @@ class VisitorManagerView(QWidget):
         self._stack.addWidget(pending_page)
 
         # 탭 1: 등록된 방문자
-        self._reg_scroll, self._reg_gallery, self._reg_layout = self._make_gallery()
+        self._reg_view_mode = "list"  # 기본: 리스트
         self._reg_empty = self._make_empty_label("등록된 방문자가 없습니다")
         reg_page = QWidget()
         rl = QVBoxLayout(reg_page)
         rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(8)
+
+        # 뷰 모드 전환 바
+        view_bar = QHBoxLayout()
+        view_bar.setSpacing(6)
+        lbl_count = QLabel("")
+        lbl_count.setObjectName("subtitleLabel")
+        self._reg_count_label = lbl_count
+        view_bar.addWidget(lbl_count)
+        view_bar.addStretch()
+
+        btn_list = QPushButton("≡ 리스트")
+        btn_grid = QPushButton("⊞ 그리드")
+        for b in [btn_list, btn_grid]:
+            b.setFixedHeight(28)
+            b.setStyleSheet("""
+                QPushButton { background: rgba(255,255,255,0.04); color: #94a3b8;
+                    border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
+                    padding: 4px 10px; font-size: 11px; font-weight: bold; }
+                QPushButton:hover { background: rgba(0,168,255,0.10); color: #00A8FF; }
+                QPushButton:checked { background: rgba(0,168,255,0.15); color: #00A8FF;
+                    border-color: rgba(0,168,255,0.3); }
+            """)
+            b.setCheckable(True)
+        btn_list.setChecked(True)
+        self._btn_view_list = btn_list
+        self._btn_view_grid = btn_grid
+        btn_list.clicked.connect(lambda: self._set_reg_view("list"))
+        btn_grid.clicked.connect(lambda: self._set_reg_view("grid"))
+        view_bar.addWidget(btn_list)
+        view_bar.addWidget(btn_grid)
+        rl.addLayout(view_bar)
+
+        # 스크롤 영역 (리스트/그리드 공용)
+        self._reg_scroll = QScrollArea()
+        self._reg_scroll.setWidgetResizable(True)
+        self._reg_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._reg_container = QWidget()
+        self._reg_list_layout = QVBoxLayout(self._reg_container)
+        self._reg_list_layout.setContentsMargins(0, 0, 0, 0)
+        self._reg_list_layout.setSpacing(8)
+        self._reg_list_layout.addStretch()
+        self._reg_scroll.setWidget(self._reg_container)
+
         rl.addWidget(self._reg_empty)
         rl.addWidget(self._reg_scroll, 1)
         self._stack.addWidget(reg_page)
@@ -579,29 +720,58 @@ class VisitorManagerView(QWidget):
             card = PendingFaceCard(dict(f), self)
             self._pending_layout.addWidget(card)
 
+    def _set_reg_view(self, mode: str):
+        self._reg_view_mode = mode
+        self._btn_view_list.setChecked(mode == "list")
+        self._btn_view_grid.setChecked(mode == "grid")
+        self._refresh_registered()
+
+    def _get_visitor_thumb(self, v):
+        try:
+            thumb_path = v["thumbnail_path"]
+        except (IndexError, KeyError):
+            thumb_path = None
+        if not thumb_path or not os.path.exists(thumb_path):
+            thumb = database.execute(
+                "SELECT thumbnail_path FROM visit_logs WHERE visitor_id=? AND thumbnail_path IS NOT NULL ORDER BY timestamp DESC LIMIT 1",
+                (v["id"],), fetch="one")
+            thumb_path = thumb["thumbnail_path"] if thumb else None
+        return thumb_path
+
     def _refresh_registered(self):
-        self._clear_layout(self._reg_layout)
-        visitors = database.get_all_visitors() or []
-        self._reg_empty.setVisible(len(visitors) == 0)
-        self._reg_scroll.setVisible(len(visitors) > 0)
+        try:
+            # 기존 위젯 제거
+            layout = self._reg_list_layout
+            while layout.count():
+                item = layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
 
-        for v in visitors:
-            vid = v["id"]
-            # 썸네일: visitors 테이블 우선 → visit_logs 폴백
-            try:
-                thumb_path = v["thumbnail_path"]
-            except (IndexError, KeyError):
-                thumb_path = None
-            if not thumb_path or not os.path.exists(thumb_path):
-                thumb = database.execute(
-                    "SELECT thumbnail_path FROM visit_logs WHERE visitor_id=? AND thumbnail_path IS NOT NULL ORDER BY timestamp DESC LIMIT 1",
-                    (vid,), fetch="one")
-                thumb_path = thumb["thumbnail_path"] if thumb else None
+            visitors = database.get_all_visitors() or []
+            self._reg_empty.setVisible(len(visitors) == 0)
+            self._reg_scroll.setVisible(len(visitors) > 0)
+            self._reg_count_label.setText(f"등록 {len(visitors)}명")
 
-            # 임베딩 수
-            embs = database.get_embeddings_for_visitor(vid) or []
-            card = RegisteredCard(vid, v["name"], thumb_path, len(embs), self)
-            self._reg_layout.addWidget(card)
+            if self._reg_view_mode == "list":
+                for v in visitors:
+                    thumb_path = self._get_visitor_thumb(v)
+                    embs = database.get_embeddings_for_visitor(v["id"]) or []
+                    card = RegisteredListCard(v["id"], v["name"], thumb_path, len(embs), self)
+                    layout.addWidget(card)
+            else:
+                grid_widget = QWidget()
+                grid_flow = FlowLayout(grid_widget, h_spacing=12, v_spacing=12)
+                for v in visitors:
+                    thumb_path = self._get_visitor_thumb(v)
+                    embs = database.get_embeddings_for_visitor(v["id"]) or []
+                    card = RegisteredCard(v["id"], v["name"], thumb_path, len(embs), self)
+                    grid_flow.addWidget(card)
+                layout.addWidget(grid_widget)
+
+            layout.addStretch()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
 
     def _refresh_trash(self):
         self._clear_layout(self._trash_layout)
@@ -682,8 +852,9 @@ class VisitorManagerView(QWidget):
         """현재 탭에서 검색 (등록된 방문자만)"""
         if self._stack.currentIndex() != 1:
             return
-        for i in range(self._reg_layout.count()):
-            item = self._reg_layout.itemAt(i)
+        layout = self._reg_list_layout
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
             if item and item.widget():
                 card = item.widget()
                 if hasattr(card, 'visitor_name'):
