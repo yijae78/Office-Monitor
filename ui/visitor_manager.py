@@ -13,6 +13,52 @@ from PyQt6.QtGui import QPixmap, QImage
 import database
 from .flow_layout import FlowLayout
 
+_INPUT_DIALOG_STYLE = """
+QInputDialog {
+    background: #ffffff;
+}
+QLabel {
+    color: #0f172a;
+    font-size: 14px;
+}
+QLineEdit {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 14px;
+    color: #0f172a;
+    min-height: 32px;
+}
+QLineEdit:focus {
+    border-color: #00A8FF;
+}
+QPushButton {
+    background: #00A8FF;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 16px;
+    font-size: 13px;
+    font-weight: bold;
+    min-height: 32px;
+}
+QPushButton:hover {
+    background: #0090dd;
+}
+"""
+
+
+def _styled_input(parent, title: str, label: str, text: str = ""):
+    """다크 테마 스타일이 적용된 텍스트 입력 다이얼로그"""
+    dlg = QInputDialog(parent)
+    dlg.setWindowTitle(title)
+    dlg.setLabelText(label)
+    dlg.setTextValue(text)
+    dlg.setStyleSheet(_INPUT_DIALOG_STYLE)
+    ok = dlg.exec()
+    return dlg.textValue(), ok
+
 
 # ═══════════════════════════════════════
 # 카드 위젯들
@@ -94,19 +140,40 @@ class PendingFaceCard(QFrame):
         layout.addLayout(btn_row)
 
     def _register(self):
-        name, ok = QInputDialog.getText(self, "방문자 등록", "이름을 입력하세요:")
+        name, ok = _styled_input(self, "방문자 등록", "이름을 입력하세요:")
         if not ok or not name.strip():
             return
 
-        # 임베딩 복원 → 등록
-        emb = np.frombuffer(self.face_data["embedding"], dtype=np.float32).copy()
-        det = self._parent_view._main_window._detection_thread
-        if det:
-            det.register_face(name.strip(), emb)
+        try:
+            name = name.strip()
+            emb = np.frombuffer(self.face_data["embedding"], dtype=np.float32).copy()
+            emb_bytes = emb.tobytes()
+            img_path = self.face_data["image_path"]
+
+            # 감지 엔진이 있으면 엔진 통해 등록, 없으면 DB 직접 등록
+            det = self._parent_view._main_window._detection_thread
+            if det:
+                visitor_id = det.register_face(name, emb)
+            else:
+                existing = database.find_visitor_by_name(name)
+                if existing:
+                    visitor_id = existing["id"]
+                    database.add_embedding(visitor_id, emb_bytes)
+                else:
+                    visitor_id = database.add_visitor(name)
+                    database.add_embedding(visitor_id, emb_bytes)
+
+            # 캡처 이미지를 방문자 썸네일로 저장
+            if img_path and os.path.exists(img_path):
+                database.update_visitor_thumbnail(visitor_id, img_path)
+
             database.remove_pending_face(self.face_id)
             self._parent_view.refresh()
             from .toast_widget import ToastWidget
-            ToastWidget.show_toast(self._parent_view.window(), f"'{name.strip()}' 등록 완료", True)
+            ToastWidget.show_toast(self._parent_view.window(), f"'{name}' 등록 완료", True)
+        except Exception as e:
+            from .toast_widget import ToastWidget
+            ToastWidget.show_toast(self._parent_view.window(), f"등록 실패: {e}", False)
 
     def _delete(self):
         database.soft_delete_pending_face(self.face_id)
@@ -207,16 +274,16 @@ class RegisteredCard(QFrame):
         self.visitor_name = name
         self._parent_view = parent_view
         self.setObjectName("glassCard")
-        self.setFixedSize(160, 220)
+        self.setFixedSize(160, 260)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
 
         # 썸네일 또는 기본 아이콘
         img_label = QLabel()
         img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        img_label.setFixedSize(144, 120)
+        img_label.setFixedSize(144, 100)
         img_label.setStyleSheet("""
             border: 1px solid rgba(0,168,255,0.15);
             border-radius: 10px;
@@ -225,25 +292,35 @@ class RegisteredCard(QFrame):
 
         if thumb_path and os.path.exists(thumb_path):
             pixmap = QPixmap(thumb_path).scaled(
-                140, 116,
+                140, 96,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
             img_label.setPixmap(pixmap)
         else:
             img_label.setText("👤")
-            img_label.setStyleSheet(img_label.styleSheet() + "font-size: 42px; color: rgba(255,255,255,0.2);")
+            img_label.setStyleSheet(img_label.styleSheet() + "font-size: 36px; color: rgba(255,255,255,0.2);")
 
         layout.addWidget(img_label)
 
-        # 이름
+        # 이름 — 사진 바로 아래, 크고 확실하게
         name_label = QLabel(name)
+        name_label.setObjectName("visitorName")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #f1f5f9;")
+        name_label.setMinimumHeight(24)
+        name_label.setStyleSheet("""
+            QLabel#visitorName {
+                font-size: 15px;
+                font-weight: bold;
+                color: #00A8FF;
+                background: transparent;
+                padding: 4px 0;
+            }
+        """)
         name_label.setWordWrap(True)
         layout.addWidget(name_label)
 
-        # 임베딩 수 뱃지
+        # 임베딩 수
         info = QLabel(f"임베딩 {emb_count}개")
         info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         info.setStyleSheet("font-size: 10px; color: #64748b;")
@@ -278,7 +355,7 @@ class RegisteredCard(QFrame):
         layout.addLayout(btn_row2)
 
     def _edit(self):
-        name, ok = QInputDialog.getText(
+        name, ok = _styled_input(
             self, "이름 편집", "새 이름을 입력하세요:", text=self.visitor_name)
         if ok and name.strip() and name.strip() != self.visitor_name:
             database.update_visitor_name(self.visitor_id, name.strip())
@@ -510,11 +587,16 @@ class VisitorManagerView(QWidget):
 
         for v in visitors:
             vid = v["id"]
-            # 최신 썸네일 가져오기
-            thumb = database.execute(
-                "SELECT thumbnail_path FROM visit_logs WHERE visitor_id=? AND thumbnail_path IS NOT NULL ORDER BY timestamp DESC LIMIT 1",
-                (vid,), fetch="one")
-            thumb_path = thumb["thumbnail_path"] if thumb else None
+            # 썸네일: visitors 테이블 우선 → visit_logs 폴백
+            try:
+                thumb_path = v["thumbnail_path"]
+            except (IndexError, KeyError):
+                thumb_path = None
+            if not thumb_path or not os.path.exists(thumb_path):
+                thumb = database.execute(
+                    "SELECT thumbnail_path FROM visit_logs WHERE visitor_id=? AND thumbnail_path IS NOT NULL ORDER BY timestamp DESC LIMIT 1",
+                    (vid,), fetch="one")
+                thumb_path = thumb["thumbnail_path"] if thumb else None
 
             # 임베딩 수
             embs = database.get_embeddings_for_visitor(vid) or []
@@ -614,7 +696,7 @@ class VisitorManagerView(QWidget):
         if not path:
             return
 
-        name, ok = QInputDialog.getText(self, "방문자 등록", "이름을 입력하세요:")
+        name, ok = _styled_input(self, "방문자 등록", "이름을 입력하세요:")
         if not ok or not name.strip():
             return
 
@@ -630,7 +712,9 @@ class VisitorManagerView(QWidget):
             if not faces:
                 QMessageBox.warning(self, "오류", "이미지에서 얼굴을 찾을 수 없습니다")
                 return
-            det.register_face(name.strip(), faces[0].embedding)
+            visitor_id = det.register_face(name.strip(), faces[0].embedding)
+            # 선택한 이미지를 방문자 썸네일로 저장
+            database.update_visitor_thumbnail(visitor_id, path)
             self.refresh()
             from .toast_widget import ToastWidget
             ToastWidget.show_toast(self.window(), f"'{name.strip()}' 등록 완료", True)

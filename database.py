@@ -41,16 +41,18 @@ def init_db():
     conn = get_connection()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS visitors (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT NOT NULL,
-            created_at  TEXT DEFAULT (datetime('now','localtime')),
-            updated_at  TEXT DEFAULT (datetime('now','localtime'))
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL,
+            thumbnail_path  TEXT,
+            created_at      TEXT DEFAULT (datetime('now','localtime')),
+            updated_at      TEXT DEFAULT (datetime('now','localtime'))
         );
 
         CREATE TABLE IF NOT EXISTS face_embeddings (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             visitor_id  INTEGER NOT NULL REFERENCES visitors(id) ON DELETE CASCADE,
             embedding   BLOB NOT NULL,
+            quality     REAL DEFAULT 0.0,
             created_at  TEXT DEFAULT (datetime('now','localtime'))
         );
 
@@ -90,6 +92,15 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_visit_logs_visitor ON visit_logs(visitor_id);
         CREATE INDEX IF NOT EXISTS idx_embeddings_visitor ON face_embeddings(visitor_id);
     """)
+    # 기존 DB 마이그레이션
+    for stmt in [
+        "ALTER TABLE visitors ADD COLUMN thumbnail_path TEXT",
+        "ALTER TABLE face_embeddings ADD COLUMN quality REAL DEFAULT 0.0",
+    ]:
+        try:
+            conn.execute(stmt)
+        except Exception:
+            pass
     conn.close()
 
 
@@ -117,15 +128,31 @@ def update_visitor_name(visitor_id: int, name: str):
             (name, visitor_id))
 
 
+def update_visitor_thumbnail(visitor_id: int, path: str):
+    execute("UPDATE visitors SET thumbnail_path=?, updated_at=datetime('now','localtime') WHERE id=?",
+            (path, visitor_id))
+
+
 def delete_visitor(visitor_id: int):
     execute("DELETE FROM visitors WHERE id=?", (visitor_id,))
 
 
 # ── 얼굴 임베딩 ──
 
-def add_embedding(visitor_id: int, embedding_bytes: bytes) -> int:
-    return execute("INSERT INTO face_embeddings (visitor_id, embedding) VALUES (?,?)",
-                   (visitor_id, embedding_bytes))
+def add_embedding(visitor_id: int, embedding_bytes: bytes, quality: float = 0.0) -> int:
+    return execute("INSERT INTO face_embeddings (visitor_id, embedding, quality) VALUES (?,?,?)",
+                   (visitor_id, embedding_bytes, quality))
+
+
+def get_lowest_quality_embedding(visitor_id: int):
+    """가장 품질이 낮은 임베딩 반환"""
+    return execute(
+        "SELECT id, quality FROM face_embeddings WHERE visitor_id=? ORDER BY quality ASC LIMIT 1",
+        (visitor_id,), fetch="one")
+
+
+def delete_embedding(emb_id: int):
+    execute("DELETE FROM face_embeddings WHERE id=?", (emb_id,))
 
 
 def get_embeddings_for_visitor(visitor_id: int):
@@ -147,6 +174,12 @@ def add_visit_log(visitor_id, visitor_name: str, confidence: float,
     return execute(
         "INSERT INTO visit_logs (visitor_id, visitor_name, confidence, thumbnail_path, is_registered) VALUES (?,?,?,?,?)",
         (visitor_id, visitor_name, confidence, thumbnail_path, 1 if is_registered else 0))
+
+
+def clear_today_visits():
+    """오늘 방문 로그 삭제"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    return execute("DELETE FROM visit_logs WHERE timestamp LIKE ?", (f"{today}%",))
 
 
 def get_today_visits():

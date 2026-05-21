@@ -169,11 +169,19 @@ class DetectionThread(QThread):
                 embedding = None
                 best_sim = 0.0
 
+                face_abs_bbox = None  # 얼굴 영역 bbox (전체 프레임 좌표)
+
                 if person_crop.size > 0:
                     try:
                         faces = self._app.get(person_crop)
                         if faces:
                             face = max(faces, key=lambda f: f.det_score)
+                            # 얼굴 bbox를 전체 프레임 좌표로 변환
+                            fb = face.bbox.astype(int)
+                            face_abs_bbox = [
+                                fb[0] + px1, fb[1] + py1,
+                                fb[2] + px1, fb[3] + py1,
+                            ]
                             if face.det_score >= self._score_threshold and face.embedding is not None:
                                 embedding = face.embedding
                                 # 얼굴 매칭
@@ -191,7 +199,10 @@ class DetectionThread(QThread):
                                     self._track_registered[track_id] = True
 
                                     if self._auto_augment:
-                                        self._try_augment_embedding(visitor_id, embedding)
+                                        q = self._compute_quality_score(
+                                            frame, face_abs_bbox,
+                                            float(face.det_score), face)
+                                        self._try_augment_embedding(visitor_id, embedding, q)
                                 else:
                                     # 미등록이지만 이전에 바인딩된 이름이 있으면 유지
                                     if track_id not in self._track_names:
@@ -201,20 +212,19 @@ class DetectionThread(QThread):
 
                                     # 미등록 얼굴 → 최고 프레임 수집
                                     if not is_registered:
-                                        face_bbox = face.bbox.astype(int)
-                                        abs_bbox = [
-                                            face_bbox[0] + px1, face_bbox[1] + py1,
-                                            face_bbox[2] + px1, face_bbox[3] + py1,
-                                        ]
                                         self._notify_new_face(
-                                            frame, abs_bbox, embedding, now,
+                                            frame, face_abs_bbox, embedding, now,
                                             det_score=float(face.det_score),
                                             track_id=track_id, face=face)
                     except Exception:
                         pass
 
+                # 얼굴 bbox가 있으면 얼굴만, 없으면 표시 안 함
+                if face_abs_bbox is None:
+                    continue
+
                 results.append({
-                    "bbox": bbox,
+                    "bbox": face_abs_bbox,
                     "name": name,
                     "confidence": conf,
                     "similarity": float(best_sim),
@@ -277,7 +287,8 @@ class DetectionThread(QThread):
             })
 
             if is_registered and self._auto_augment and embedding is not None:
-                self._try_augment_embedding(visitor_id, embedding)
+                q = self._compute_quality_score(frame, bbox, float(face.det_score), face)
+                self._try_augment_embedding(visitor_id, embedding, q)
 
             cooldown_key = visitor_id if visitor_id else f"unknown_{bbox[0]}_{bbox[1]}"
             last_seen = self._cooldown_map.get(cooldown_key, 0)
@@ -318,15 +329,30 @@ class DetectionThread(QThread):
 
         return name, visitor_id, best_sim, is_registered
 
-    def _try_augment_embedding(self, visitor_id: int, embedding: np.ndarray):
+    def _try_augment_embedding(self, visitor_id: int, embedding: np.ndarray, quality: float = 0.0):
         info = self._known_faces.get(visitor_id)
-        if not info or len(info["embeddings"]) >= self.MAX_EMBEDDINGS_PER_VISITOR:
+        if not info:
             return
+
+        # 기존 임베딩과 너무 유사하면 스킵 (다양성 확보)
         max_sim = max(self._cosine_sim(embedding, e) for e in info["embeddings"])
-        if max_sim < 0.8:
-            emb_bytes = embedding.astype(np.float32).tobytes()
-            database.add_embedding(visitor_id, emb_bytes)
+        if max_sim > 0.85:
+            return
+
+        emb_bytes = embedding.astype(np.float32).tobytes()
+
+        if len(info["embeddings"]) < self.MAX_EMBEDDINGS_PER_VISITOR:
+            # 10개 미만이면 추가
+            database.add_embedding(visitor_id, emb_bytes, quality)
             info["embeddings"].append(embedding.copy())
+        else:
+            # 10개 꽉 찼으면: 새 것이 가장 낮은 품질보다 좋을 때만 교체
+            lowest = database.get_lowest_quality_embedding(visitor_id)
+            if lowest and quality > lowest["quality"]:
+                database.delete_embedding(lowest["id"])
+                database.add_embedding(visitor_id, emb_bytes, quality)
+                # 메모리 캐시도 갱신
+                self._load_known_faces()
 
     def _load_pending_embeddings(self):
         """DB의 pending_faces 임베딩을 캐시로 로드 (중복 방지용)"""

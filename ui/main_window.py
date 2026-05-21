@@ -316,6 +316,18 @@ class MainWindow(QMainWindow):
         self.lbl_today_visitors = QLabel("오늘 방문자: 0")
         self.lbl_today_visitors.setObjectName("subtitleLabel")
         det_lay.addWidget(self.lbl_today_visitors)
+
+        btn_reset = QPushButton("오늘 기록 리셋")
+        btn_reset.setObjectName("btnCapture")
+        btn_reset.setFixedHeight(28)
+        btn_reset.setStyleSheet("""
+            QPushButton { background: rgba(239,68,68,0.10); color: #f87171;
+                border: 1px solid rgba(239,68,68,0.25); border-radius: 6px;
+                font-size: 11px; font-weight: bold; }
+            QPushButton:hover { background: rgba(239,68,68,0.20); }
+        """)
+        btn_reset.clicked.connect(self._reset_today)
+        det_lay.addWidget(btn_reset)
         layout.addWidget(det_card)
 
         # 녹화 상태 + 목록
@@ -710,6 +722,26 @@ class MainWindow(QMainWindow):
                         total += os.path.getsize(fp)
         mb = total / (1024 * 1024)
         self.kpi_storage.set_value(f"{mb:.0f} MB" if mb < 1024 else f"{mb/1024:.1f} GB")
+
+    def _reset_today(self):
+        """오늘 방문 기록 + 타임라인 + 감지 캐시 리셋"""
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "리셋 확인", "오늘 방문 기록, 타임라인, 미등록 캡처를\n모두 초기화하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        database.clear_today_visits()
+        self.timeline.clear()
+        if self._detection_thread:
+            self._detection_thread._cooldown_map.clear()
+            self._detection_thread._track_names.clear()
+            self._detection_thread._track_visitors.clear()
+            self._detection_thread._track_registered.clear()
+        self.camera_widget._detections = []
+        self._update_kpi()
+        ToastWidget.show_toast(self, "오늘 기록 리셋 완료", True)
 
     # ═══════════════════════════════════════
     # 데이터 자동 정리

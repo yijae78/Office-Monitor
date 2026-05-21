@@ -22,9 +22,10 @@ class CameraWidget(QWidget):
         self.setMouseTracking(True)
 
     def update_frame(self, frame: np.ndarray, detections: list = None):
-        """새 프레임 + 감지 결과 업데이트"""
+        """새 프레임 + 감지 결과 업데이트. detections=None이면 이전 결과 유지."""
         self._frame = frame
-        self._detections = detections or []
+        if detections is not None:
+            self._detections = detections
         self._status_ok = True
         self._status_text = ""
         self.update()
@@ -131,36 +132,34 @@ class CameraWidget(QWidget):
                 bbox = det.get("bbox", [])
                 name = det.get("name", "")
                 is_reg = det.get("is_registered", False)
-                det_type = det.get("type", "face")
-                if len(bbox) == 4:
-                    bx = int((bbox[0] - crop_x1) * scale_x) + x
-                    by = int((bbox[1] - crop_y1) * scale_y) + y
-                    bw = int((bbox[2] - bbox[0]) * scale_x)
-                    bh = int((bbox[3] - bbox[1]) * scale_y)
+                if len(bbox) != 4:
+                    continue
 
-                    # 등록: 초록, 미등록: 시안, 사람(얼굴 없음): 회색
-                    if is_reg:
-                        color = QColor(34, 197, 94)
-                    elif name == "미등록":
-                        color = QColor(0, 168, 255)
-                    else:
-                        color = QColor(100, 116, 139)
+                # 등록된 사람만 표시
+                if not is_reg:
+                    continue
 
-                    line_w = 2 if det_type == "face" else 1
-                    pen = QPen(color, line_w)
-                    painter.setPen(pen)
-                    painter.drawRect(bx, by, bw, bh)
+                bx = int((bbox[0] - crop_x1) * scale_x) + x
+                by = int((bbox[1] - crop_y1) * scale_y) + y
+                bw = int((bbox[2] - bbox[0]) * scale_x)
+                bh = int((bbox[3] - bbox[1]) * scale_y)
 
-                    if name:
-                        font = QFont("Pretendard Variable", 11)
-                        font.setWeight(QFont.Weight.Bold)
-                        painter.setFont(font)
-                        painter.setPen(color)
-                        label = name
-                        track_id = det.get("track_id", -1)
-                        if track_id >= 0:
-                            label = f"[{track_id}] {name}"
-                        painter.drawText(bx, by - 6, label)
+                color = QColor(34, 197, 94)
+                pen = QPen(color, 2)
+                painter.setPen(pen)
+                painter.drawRect(bx, by, bw, bh)
+
+                if name:
+                    font = QFont("Pretendard Variable", 12)
+                    font.setWeight(QFont.Weight.Bold)
+                    painter.setFont(font)
+                    fm = painter.fontMetrics()
+                    tw = fm.horizontalAdvance(name) + 8
+                    th = fm.height() + 4
+                    label_y = by - th - 2
+                    painter.fillRect(bx, label_y, tw, th, QColor(0, 0, 0, 180))
+                    painter.setPen(color)
+                    painter.drawText(bx + 4, by - 6, name)
 
     def _paint_placeholder(self, painter: QPainter):
         """카메라 미연결 시 플레이스홀더"""
