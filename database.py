@@ -96,6 +96,7 @@ def init_db():
     for stmt in [
         "ALTER TABLE visitors ADD COLUMN thumbnail_path TEXT",
         "ALTER TABLE face_embeddings ADD COLUMN quality REAL DEFAULT 0.0",
+        "ALTER TABLE visitors ADD COLUMN status TEXT DEFAULT 'active'",
     ]:
         try:
             conn.execute(stmt)
@@ -120,7 +121,11 @@ def get_visitor(visitor_id: int):
 
 
 def get_all_visitors():
-    return execute("SELECT * FROM visitors ORDER BY name", fetch="all")
+    return execute("SELECT * FROM visitors WHERE COALESCE(status,'active')='active' ORDER BY name", fetch="all")
+
+
+def get_deleted_visitors():
+    return execute("SELECT * FROM visitors WHERE status='deleted' ORDER BY name", fetch="all")
 
 
 def update_visitor_name(visitor_id: int, name: str):
@@ -134,6 +139,19 @@ def update_visitor_thumbnail(visitor_id: int, path: str):
 
 
 def delete_visitor(visitor_id: int):
+    """소프트 삭제 (휴지통으로 이동)"""
+    execute("UPDATE visitors SET status='deleted', updated_at=datetime('now','localtime') WHERE id=?",
+            (visitor_id,))
+
+
+def restore_visitor(visitor_id: int):
+    """휴지통에서 복구"""
+    execute("UPDATE visitors SET status='active', updated_at=datetime('now','localtime') WHERE id=?",
+            (visitor_id,))
+
+
+def hard_delete_visitor(visitor_id: int):
+    """완전 삭제 (DB에서 제거)"""
     execute("DELETE FROM visitors WHERE id=?", (visitor_id,))
 
 

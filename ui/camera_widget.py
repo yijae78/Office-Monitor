@@ -307,30 +307,34 @@ class CameraWidget(QWidget):
                 if len(bbox) != 4:
                     continue
 
-                # 정확히 확인된 등록자만 표시 (유사도 0.55 이상)
-                if not (is_reg and sim >= 0.55):
-                    continue
-
                 bx = int((bbox[0] - crop_x1) * scale_x) + x
                 by = int((bbox[1] - crop_y1) * scale_y) + y
                 bw = int((bbox[2] - bbox[0]) * scale_x)
                 bh = int((bbox[3] - bbox[1]) * scale_y)
 
-                color = QColor(34, 197, 94)
-                pen = QPen(color, 2)
-                painter.setPen(pen)
-                painter.drawRect(bx, by, bw, bh)
+                if is_reg and sim >= 0.55:
+                    # 등록자: 녹색 박스 + 이름 라벨
+                    color = QColor(34, 197, 94)
+                    pen = QPen(color, 2)
+                    painter.setPen(pen)
+                    painter.drawRect(bx, by, bw, bh)
 
-                font = QFont("Pretendard Variable", 12)
-                font.setWeight(QFont.Weight.Bold)
-                painter.setFont(font)
-                fm = painter.fontMetrics()
-                tw = fm.horizontalAdvance(name) + 8
-                th = fm.height() + 4
-                label_y = by - th - 2
-                painter.fillRect(bx, label_y, tw, th, QColor(0, 0, 0, 180))
-                painter.setPen(color)
-                painter.drawText(bx + 4, by - 6, name)
+                    font = QFont("Pretendard Variable", 12)
+                    font.setWeight(QFont.Weight.Bold)
+                    painter.setFont(font)
+                    fm = painter.fontMetrics()
+                    tw = fm.horizontalAdvance(name) + 8
+                    th = fm.height() + 4
+                    label_y = by - th - 2
+                    painter.fillRect(bx, label_y, tw, th, QColor(0, 0, 0, 180))
+                    painter.setPen(color)
+                    painter.drawText(bx + 4, by - 6, name)
+                else:
+                    # 미등록자: 붉은 박스만 (이름 없음)
+                    color = QColor(239, 68, 68)
+                    pen = QPen(color, 2)
+                    painter.setPen(pen)
+                    painter.drawRect(bx, by, bw, bh)
 
     def _paint_placeholder(self, painter: QPainter):
         """카메라 미연결 시 플레이스홀더"""

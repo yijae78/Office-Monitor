@@ -377,6 +377,93 @@ class RegisteredCard(QFrame):
             self._parent_view.refresh()
 
 
+class DeletedVisitorListCard(QFrame):
+    """삭제된 방문자 카드 — 복구/영구삭제"""
+
+    def __init__(self, visitor_id: int, name: str, thumb_path: str, parent_view, parent=None):
+        super().__init__(parent)
+        self.visitor_id = visitor_id
+        self.visitor_name = name
+        self._parent_view = parent_view
+        self.setObjectName("glassCard")
+        self.setFixedHeight(64)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(12)
+
+        # 썸네일 (원형, 흐리게)
+        img_label = QLabel()
+        img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        img_label.setFixedSize(44, 44)
+        img_label.setStyleSheet("""
+            border: 2px solid rgba(255,255,255,0.08);
+            border-radius: 22px;
+            background: rgba(0,0,0,0.3);
+        """)
+        if thumb_path and os.path.exists(thumb_path):
+            pixmap = QPixmap(thumb_path).scaled(
+                40, 40,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            img_label.setPixmap(pixmap)
+        else:
+            img_label.setText("👤")
+            img_label.setStyleSheet(img_label.styleSheet() + "font-size: 18px; color: rgba(255,255,255,0.15);")
+        layout.addWidget(img_label)
+
+        # 이름
+        name_label = QLabel(name)
+        name_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #94a3b8; background: transparent;")
+        layout.addWidget(name_label, 1)
+
+        # 복구 버튼
+        btn_restore = QPushButton("복구")
+        btn_restore.setFixedSize(52, 32)
+        btn_restore.setStyleSheet("""
+            QPushButton { background: rgba(34,197,94,0.15); color: #34d399;
+                border: 1px solid rgba(34,197,94,0.30); border-radius: 8px;
+                font-size: 12px; font-weight: bold; }
+            QPushButton:hover { background: rgba(34,197,94,0.25); color: #6ee7b7; }
+        """)
+        btn_restore.clicked.connect(self._restore)
+        layout.addWidget(btn_restore)
+
+        # 영구삭제 버튼
+        btn_hard_del = QPushButton("영구삭제")
+        btn_hard_del.setFixedSize(68, 32)
+        btn_hard_del.setStyleSheet("""
+            QPushButton { background: rgba(239,68,68,0.15); color: #fca5a5;
+                border: 1px solid rgba(239,68,68,0.30); border-radius: 8px;
+                font-size: 12px; font-weight: bold; }
+            QPushButton:hover { background: rgba(239,68,68,0.25); color: #fecaca; }
+        """)
+        btn_hard_del.clicked.connect(self._hard_delete)
+        layout.addWidget(btn_hard_del)
+
+    def _restore(self):
+        database.restore_visitor(self.visitor_id)
+        det = self._parent_view._main_window._detection_thread
+        if det:
+            det.reload_known_faces()
+        self._parent_view.refresh()
+        from .toast_widget import ToastWidget
+        ToastWidget.show_toast(self._parent_view.window(), f"'{self.visitor_name}' 복구됨", True)
+
+    def _hard_delete(self):
+        reply = QMessageBox.question(
+            self, "영구 삭제",
+            f"'{self.visitor_name}'을(를) 영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            database.hard_delete_visitor(self.visitor_id)
+            self._parent_view.refresh()
+            from .toast_widget import ToastWidget
+            ToastWidget.show_toast(self._parent_view.window(), f"'{self.visitor_name}' 영구 삭제됨", True)
+
+
 class RegisteredListCard(QFrame):
     """등록된 방문자 — 리스트 뷰 카드 (가로 배치)"""
 
@@ -494,7 +581,7 @@ class VisitorManagerView(QWidget):
         tab_bar.setSpacing(0)
 
         self._tab_btns = []
-        tab_names = ["미등록 캡처", "등록된 방문자", "휴지통"]
+        tab_names = ["미등록 캡처", "등록된 방문자", "삭제된 방문자", "휴지통"]
         tab_group = QWidget()
         tab_group.setStyleSheet("""
             QWidget { background: rgba(255,255,255,0.04); border-radius: 10px; }
@@ -602,7 +689,50 @@ class VisitorManagerView(QWidget):
         rl.addWidget(self._reg_scroll, 1)
         self._stack.addWidget(reg_page)
 
-        # 탭 2: 휴지통
+        # 탭 2: 삭제된 방문자
+        del_visitor_page = QWidget()
+        dvl = QVBoxLayout(del_visitor_page)
+        dvl.setContentsMargins(0, 0, 0, 0)
+        dvl.setSpacing(8)
+
+        # 삭제된 방문자 액션 바
+        del_header = QHBoxLayout()
+        del_header.setSpacing(8)
+
+        self._del_visitor_count_label = QLabel("")
+        self._del_visitor_count_label.setObjectName("subtitleLabel")
+        del_header.addWidget(self._del_visitor_count_label)
+        del_header.addStretch()
+
+        self._btn_del_visitor_all = QPushButton("전체삭제")
+        self._btn_del_visitor_all.setStyleSheet("""
+            QPushButton { background: rgba(239,68,68,0.15); color: #f87171;
+                border: 1px solid rgba(239,68,68,0.30); border-radius: 8px;
+                padding: 6px 16px; font-size: 12px; font-weight: bold; }
+            QPushButton:hover { background: rgba(239,68,68,0.25); }
+        """)
+        self._btn_del_visitor_all.clicked.connect(self._delete_all_deleted_visitors)
+        del_header.addWidget(self._btn_del_visitor_all)
+
+        dvl.addLayout(del_header)
+
+        self._del_visitor_empty = self._make_empty_label("삭제된 방문자가 없습니다")
+        dvl.addWidget(self._del_visitor_empty)
+
+        self._del_visitor_scroll = QScrollArea()
+        self._del_visitor_scroll.setWidgetResizable(True)
+        self._del_visitor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._del_visitor_container = QWidget()
+        self._del_visitor_layout = QVBoxLayout(self._del_visitor_container)
+        self._del_visitor_layout.setContentsMargins(0, 0, 0, 0)
+        self._del_visitor_layout.setSpacing(8)
+        self._del_visitor_layout.addStretch()
+        self._del_visitor_scroll.setWidget(self._del_visitor_container)
+        dvl.addWidget(self._del_visitor_scroll, 1)
+
+        self._stack.addWidget(del_visitor_page)
+
+        # 탭 3: 휴지통
         self._trash_scroll, self._trash_gallery, self._trash_layout = self._make_gallery()
         self._trash_empty = self._make_empty_label("휴지통이 비어있습니다")
         trash_page = QWidget()
@@ -687,9 +817,10 @@ class VisitorManagerView(QWidget):
         self._stack.setCurrentIndex(idx)
 
     def refresh(self):
-        """3개 탭 모두 갱신"""
+        """4개 탭 모두 갱신"""
         self._refresh_pending()
         self._refresh_registered()
+        self._refresh_deleted_visitors()
         self._refresh_trash()
 
         # 미등록 캡처 수 뱃지
@@ -699,11 +830,19 @@ class VisitorManagerView(QWidget):
         else:
             self._tab_btns[0].setText("미등록 캡처")
 
+        # 삭제된 방문자 수 뱃지
+        del_visitor_count = len(database.get_deleted_visitors() or [])
+        if del_visitor_count > 0:
+            self._tab_btns[2].setText(f"삭제된 방문자 ({del_visitor_count})")
+        else:
+            self._tab_btns[2].setText("삭제된 방문자")
+
+        # 캡처 휴지통 수 뱃지
         trash_count = len(database.get_pending_faces("deleted") or [])
         if trash_count > 0:
-            self._tab_btns[2].setText(f"휴지통 ({trash_count})")
+            self._tab_btns[3].setText(f"휴지통 ({trash_count})")
         else:
-            self._tab_btns[2].setText("휴지통")
+            self._tab_btns[3].setText("휴지통")
 
     def _clear_layout(self, flow_layout):
         while flow_layout.count():
@@ -773,6 +912,46 @@ class VisitorManagerView(QWidget):
         except Exception as e:
             import traceback
             traceback.print_exc()
+
+    def _refresh_deleted_visitors(self):
+        """삭제된 방문자 탭 갱신"""
+        layout = self._del_visitor_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        visitors = database.get_deleted_visitors() or []
+        visitors = sorted(visitors, key=lambda v: v["name"])
+        has_items = len(visitors) > 0
+        self._del_visitor_empty.setVisible(not has_items)
+        self._del_visitor_scroll.setVisible(has_items)
+        self._btn_del_visitor_all.setVisible(has_items)
+        self._del_visitor_count_label.setText(f"삭제됨 {len(visitors)}명" if has_items else "")
+
+        for v in visitors:
+            thumb_path = self._get_visitor_thumb(v)
+            card = DeletedVisitorListCard(v["id"], v["name"], thumb_path, self)
+            layout.addWidget(card)
+        layout.addStretch()
+
+    def _delete_all_deleted_visitors(self):
+        """삭제된 방문자 전체 영구삭제"""
+        visitors = database.get_deleted_visitors() or []
+        if not visitors:
+            return
+        reply = QMessageBox.question(
+            self, "전체 영구삭제",
+            f"삭제된 방문자 {len(visitors)}명을 모두 영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        for v in visitors:
+            database.hard_delete_visitor(v["id"])
+        self.refresh()
+        from .toast_widget import ToastWidget
+        ToastWidget.show_toast(self.window(), f"{len(visitors)}명 영구 삭제됨", True)
 
     def _refresh_trash(self):
         self._clear_layout(self._trash_layout)
