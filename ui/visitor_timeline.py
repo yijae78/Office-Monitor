@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
-    QPushButton,
+    QPushButton, QMessageBox,
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QPixmap, QPainter, QPainterPath, QColor
@@ -107,12 +107,47 @@ class VisitorTimeline(QWidget):
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
 
-        # 토글 헤더 (cardHeader 스타일로 통일)
+        # 헤더 (토글 + 리셋 버튼)
+        from PyQt6.QtWidgets import QFrame as _QFrame
+        header_widget = _QFrame()
+        header_widget.setStyleSheet("background: transparent; border: none;")
+        header_row = QHBoxLayout(header_widget)
+        header_row.setContentsMargins(8, 6, 8, 4)
+        header_row.setSpacing(8)
+
         self._toggle_btn = QPushButton("  ▼  오늘 방문자")
-        self._toggle_btn.setObjectName("cardHeader")
+        self._toggle_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: none; color: #f1f5f9;
+                font-size: 13px; font-weight: bold; text-align: left; padding: 4px 4px; }
+            QPushButton:hover { color: #00A8FF; }
+        """)
         self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._toggle_btn.clicked.connect(self._toggle)
-        card_layout.addWidget(self._toggle_btn)
+        header_row.addWidget(self._toggle_btn, 1)
+
+        self._reset_btn = QPushButton("초기화")
+        self._reset_btn.setObjectName("resetBtn")
+        self._reset_btn.setFixedSize(64, 30)
+        self._reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._reset_btn.setStyleSheet("""
+            QPushButton#resetBtn {
+                background: rgba(239,68,68,0.15);
+                color: #f87171;
+                border: 1px solid rgba(239,68,68,0.30);
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 0px 4px;
+            }
+            QPushButton#resetBtn:hover {
+                background: rgba(239,68,68,0.25);
+                color: #fca5a5;
+            }
+        """)
+        self._reset_btn.clicked.connect(self._reset_today)
+        header_row.addWidget(self._reset_btn)
+
+        card_layout.addWidget(header_widget)
 
         # 스크롤 영역
         self._scroll = QScrollArea()
@@ -165,7 +200,7 @@ class VisitorTimeline(QWidget):
         self._scroll.setVisible(not self._collapsed)
         if self._collapsed:
             # 접힘: 헤더 높이만 차지
-            h = self._toggle_btn.sizeHint().height() + 2
+            h = 42
             self._card.setFixedHeight(h)
             self._card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
             self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -190,6 +225,21 @@ class VisitorTimeline(QWidget):
         arrow = "▶" if self._collapsed else "▼"
         suffix = f" ({count})" if count > 0 else ""
         self._toggle_btn.setText(f"  {arrow}  오늘 방문자{suffix}")
+
+    def _reset_today(self):
+        """오늘 방문 기록 초기화"""
+        reply = QMessageBox.question(
+            self, "오늘 방문자 초기화",
+            "오늘 방문 기록을 모두 삭제하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        import database
+        database.clear_today_visits()
+        self.clear()
+        from .toast_widget import ToastWidget
+        ToastWidget.show_toast(self.window(), "오늘 방문 기록 초기화됨", True)
 
     def add_visitor(self, time_str: str, name: str, thumbnail: QPixmap = None,
                     is_registered: bool = True):
