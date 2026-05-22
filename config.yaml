@@ -2,7 +2,7 @@ camera:
   id: 0
   resolution: [1280, 720]
   backend: "dshow"
-  fallback_ids: [1, 2]
+  fallback_ids: [2, 3]
 
 detection:
   model: "buffalo_l"

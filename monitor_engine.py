@@ -74,11 +74,11 @@ class CameraThread(QThread):
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # 표준 웹캠 비율 (4:3 또는 16:9 등)이 아니면 가상 카메라
+        # 표준 웹캠 비율이 아니면 가상 카메라 의심
         if h > 0:
             ratio = w / h
-            standard_ratios = [4/3, 16/9, 16/10]
-            if not any(abs(ratio - r) < 0.1 for r in standard_ratios):
+            standard_ratios = [1/1, 4/3, 3/2, 16/9, 16/10]
+            if not any(abs(ratio - r) < 0.15 for r in standard_ratios):
                 return False
 
         return True

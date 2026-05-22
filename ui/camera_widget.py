@@ -75,6 +75,7 @@ class CameraWidget(QWidget):
         self._sel_start = QPoint()
         self._sel_end = QPoint()
         self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
+        self.setFocus()
         self.update()
 
     def cancel_region_select(self):

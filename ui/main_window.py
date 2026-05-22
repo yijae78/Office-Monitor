@@ -267,8 +267,8 @@ class MainWindow(QMainWindow):
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(16, 4, 16, 12)
-        content_layout.setSpacing(8)
+        content_layout.setContentsMargins(10, 4, 10, 10)
+        content_layout.setSpacing(6)
         card_layout.addWidget(content)
 
         def toggle():
@@ -321,8 +321,8 @@ class MainWindow(QMainWindow):
         scroll_content = QWidget()
         scroll_content.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(scroll_content)
-        layout.setContentsMargins(8, 4, 4, 4)
-        layout.setSpacing(8)
+        layout.setContentsMargins(6, 4, 4, 4)
+        layout.setSpacing(6)
 
         # 카메라 정보
         cam_card, cam_lay = self._create_collapsible_card("카메라 정보")
@@ -376,10 +376,7 @@ class MainWindow(QMainWindow):
         self.lbl_rec_dir.setWordWrap(True)
         rec_lay.addWidget(self.lbl_rec_dir)
 
-        # 녹화 목록 헤더 (토글 + 폴더 열기)
-        rec_header_row = QHBoxLayout()
-        rec_header_row.setContentsMargins(0, 4, 0, 0)
-
+        # 녹화 목록 헤더 (토글)
         self._btn_rec_list_toggle = QPushButton("  ▼  최근 녹화")
         self._btn_rec_list_toggle.setStyleSheet("""
             QPushButton { background: transparent; color: #94a3b8;
@@ -388,8 +385,12 @@ class MainWindow(QMainWindow):
             QPushButton:hover { color: #f1f5f9; }
         """)
         self._btn_rec_list_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        rec_header_row.addWidget(self._btn_rec_list_toggle)
-        rec_header_row.addStretch()
+        rec_lay.addWidget(self._btn_rec_list_toggle)
+
+        # 녹화 액션 버튼 (별도 행)
+        rec_btn_row = QHBoxLayout()
+        rec_btn_row.setContentsMargins(0, 0, 0, 0)
+        rec_btn_row.setSpacing(4)
 
         btn_open_folder = QPushButton("📂 폴더")
         btn_open_folder.setFixedHeight(26)
@@ -397,11 +398,11 @@ class MainWindow(QMainWindow):
         btn_open_folder.setStyleSheet("""
             QPushButton { background: rgba(0,168,255,0.10); color: #38bdf8;
                 border: 1px solid rgba(0,168,255,0.25); border-radius: 6px;
-                font-size: 11px; padding: 2px 8px; }
+                font-size: 11px; padding: 2px 6px; }
             QPushButton:hover { background: rgba(0,168,255,0.20); color: #7dd3fc; }
         """)
         btn_open_folder.clicked.connect(lambda: os.startfile(os.path.join(DATA_DIR, "recordings")))
-        rec_header_row.addWidget(btn_open_folder)
+        rec_btn_row.addWidget(btn_open_folder)
 
         btn_delete_all_rec = QPushButton("🗑 전체삭제")
         btn_delete_all_rec.setFixedHeight(26)
@@ -409,13 +410,14 @@ class MainWindow(QMainWindow):
         btn_delete_all_rec.setStyleSheet("""
             QPushButton { background: rgba(239,68,68,0.10); color: #f87171;
                 border: 1px solid rgba(239,68,68,0.25); border-radius: 6px;
-                font-size: 11px; padding: 2px 8px; }
+                font-size: 11px; padding: 2px 6px; }
             QPushButton:hover { background: rgba(239,68,68,0.20); color: #ff5252; }
         """)
         btn_delete_all_rec.clicked.connect(self._delete_all_recordings)
-        rec_header_row.addWidget(btn_delete_all_rec)
+        rec_btn_row.addWidget(btn_delete_all_rec)
 
-        rec_lay.addLayout(rec_header_row)
+        rec_btn_row.addStretch()
+        rec_lay.addLayout(rec_btn_row)
 
         self._rec_list_widget = QWidget()
         self._rec_list_layout = QVBoxLayout(self._rec_list_widget)
@@ -1055,11 +1057,22 @@ class MainWindow(QMainWindow):
             self._tray_show()
 
     def changeEvent(self, event):
-        if event.type() == event.Type.WindowStateChange:
-            if self.isMinimized() and hasattr(self, "_tray"):
-                self.hide()
-                self._tray.showMessage("OfficeMonitor", "백그라운드에서 실행 중", QSystemTrayIcon.MessageIcon.Information, 2000)
+        # 최소화 시 작업표시줄에 유지 (숨기지 않음)
         super().changeEvent(event)
+
+    def keyPressEvent(self, event):
+        """ESC 키: 캡처 모드 취소 / 전체화면 해제"""
+        if event.key() == Qt.Key.Key_Escape:
+            if self.camera_widget._selecting:
+                self.camera_widget.cancel_region_select()
+                self.status_bar.showMessage("캡처 취소됨")
+                event.accept()
+                return
+            if self.isFullScreen():
+                self._exit_fullscreen()
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     # ═══════════════════════════════════════
     # 반응형 레이아웃
@@ -1069,11 +1082,15 @@ class MainWindow(QMainWindow):
         """창 크기에 따라 오른쪽 패널 너비 동적 조절"""
         super().resizeEvent(event)
         w = self.width()
-        # 창 너비의 22% (최소 200, 최대 360)
-        new_width = max(200, min(360, int(w * 0.22)))
-        if new_width != self._panel_width and self._panel_expanded:
-            self._panel_width = new_width
-            self.right_panel.setFixedWidth(new_width)
+        if w < 700 and self._panel_expanded:
+            # 창이 너무 좁으면 패널 자동 숨김
+            self._toggle_right_panel()
+        elif w >= 700:
+            # 창 너비의 22% (최소 220, 최대 360)
+            new_width = max(220, min(360, int(w * 0.22)))
+            if new_width != self._panel_width and self._panel_expanded:
+                self._panel_width = new_width
+                self.right_panel.setFixedWidth(new_width)
 
     # ═══════════════════════════════════════
     # 종료
