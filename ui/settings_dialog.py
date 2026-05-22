@@ -143,34 +143,55 @@ class SettingsDialog(QDialog):
         """)
         self._form.addWidget(lbl)
 
-    def _add_spin(self, label: str, value: int, min_v: int, max_v: int) -> QSpinBox:
+    def _make_spin_row(self, spin, label: str):
+        """SpinBox/DoubleSpinBox에 -/+ 버튼을 붙인 행을 만든다"""
         row = QHBoxLayout()
         lbl = QLabel(label)
         lbl.setStyleSheet("font-size: 13px; color: #94a3b8; min-width: 160px;")
         row.addWidget(lbl)
+
+        btn_style = """
+            QPushButton { background: rgba(255,255,255,0.12); color: #e2e8f0;
+                border: 1px solid rgba(255,255,255,0.20); border-radius: 6px;
+                font-size: 16px; font-weight: bold; padding: 0; }
+            QPushButton:hover { background: rgba(0,168,255,0.25); color: #38bdf8;
+                border-color: rgba(0,168,255,0.4); }
+            QPushButton:pressed { background: rgba(0,168,255,0.35); }
+        """
+        btn_minus = QPushButton("−")
+        btn_minus.setFixedSize(28, 28)
+        btn_minus.setStyleSheet(btn_style)
+        btn_minus.clicked.connect(lambda: spin.stepDown())
+        row.addWidget(btn_minus)
+
+        spin.setFixedWidth(90)
+        spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        row.addWidget(spin)
+
+        btn_plus = QPushButton("+")
+        btn_plus.setFixedSize(28, 28)
+        btn_plus.setStyleSheet(btn_style)
+        btn_plus.clicked.connect(lambda: spin.stepUp())
+        row.addWidget(btn_plus)
+
+        row.addStretch()
+        self._form.addLayout(row)
+
+    def _add_spin(self, label: str, value: int, min_v: int, max_v: int) -> QSpinBox:
         spin = QSpinBox()
         spin.setRange(min_v, max_v)
         spin.setValue(value)
-        spin.setFixedWidth(120)
-        row.addWidget(spin)
-        row.addStretch()
-        self._form.addLayout(row)
+        self._make_spin_row(spin, label)
         return spin
 
     def _add_double(self, label: str, value: float, min_v: float, max_v: float, step: float) -> QDoubleSpinBox:
-        row = QHBoxLayout()
-        lbl = QLabel(label)
-        lbl.setStyleSheet("font-size: 13px; color: #94a3b8; min-width: 160px;")
-        row.addWidget(lbl)
         spin = QDoubleSpinBox()
         spin.setRange(min_v, max_v)
         spin.setSingleStep(step)
         spin.setDecimals(2)
         spin.setValue(value)
-        spin.setFixedWidth(120)
-        row.addWidget(spin)
-        row.addStretch()
-        self._form.addLayout(row)
+        self._make_spin_row(spin, label)
         return spin
 
     def _add_check(self, label: str, checked: bool) -> QCheckBox:
@@ -246,26 +267,11 @@ class SettingsDialog(QDialog):
         QLabel { background: transparent; }
         QSpinBox, QDoubleSpinBox {
             background: rgba(255,255,255,0.06);
-            border: 1px solid rgba(255,255,255,0.10);
+            border: 1px solid rgba(255,255,255,0.15);
             border-radius: 8px; padding: 6px 10px;
             color: #f1f5f9; font-size: 13px;
         }
         QSpinBox:focus, QDoubleSpinBox:focus { border-color: #00A8FF; }
-        QSpinBox::up-button, QSpinBox::down-button,
-        QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
-            width: 20px; border: none;
-            background: rgba(255,255,255,0.04);
-        }
-        QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
-            image: none; border: none;
-            border-left: 4px solid transparent; border-right: 4px solid transparent;
-            border-bottom: 5px solid #94a3b8;
-        }
-        QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
-            image: none; border: none;
-            border-left: 4px solid transparent; border-right: 4px solid transparent;
-            border-top: 5px solid #94a3b8;
-        }
         QCheckBox { background: transparent; }
         QCheckBox::indicator {
             width: 18px; height: 18px; border-radius: 4px;

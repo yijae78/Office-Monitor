@@ -330,24 +330,24 @@ class RegisteredCard(QFrame):
         btn_row2 = QHBoxLayout()
         btn_row2.setSpacing(6)
 
-        btn_edit = QPushButton("편집")
-        btn_edit.setFixedHeight(28)
+        btn_edit = QPushButton("이름변경")
+        btn_edit.setFixedHeight(30)
         btn_edit.setStyleSheet("""
-            QPushButton { background: rgba(59,130,246,0.10); color: #60a5fa;
-                border: 1px solid rgba(59,130,246,0.25); border-radius: 6px;
-                font-size: 11px; font-weight: bold; }
-            QPushButton:hover { background: rgba(59,130,246,0.20); }
+            QPushButton { background: rgba(59,130,246,0.18); color: #93bbfc;
+                border: 1px solid rgba(59,130,246,0.35); border-radius: 6px;
+                font-size: 12px; font-weight: bold; }
+            QPushButton:hover { background: rgba(59,130,246,0.30); color: #bdd4fe; }
         """)
         btn_edit.clicked.connect(self._edit)
         btn_row2.addWidget(btn_edit)
 
         btn_del = QPushButton("삭제")
-        btn_del.setFixedHeight(28)
+        btn_del.setFixedHeight(30)
         btn_del.setStyleSheet("""
-            QPushButton { background: rgba(239,68,68,0.10); color: #f87171;
-                border: 1px solid rgba(239,68,68,0.25); border-radius: 6px;
-                font-size: 11px; font-weight: bold; }
-            QPushButton:hover { background: rgba(239,68,68,0.20); }
+            QPushButton { background: rgba(239,68,68,0.18); color: #fca5a5;
+                border: 1px solid rgba(239,68,68,0.35); border-radius: 6px;
+                font-size: 12px; font-weight: bold; }
+            QPushButton:hover { background: rgba(239,68,68,0.30); color: #fecaca; }
         """)
         btn_del.clicked.connect(self._delete)
         btn_row2.addWidget(btn_del)
@@ -427,26 +427,26 @@ class RegisteredListCard(QFrame):
 
         layout.addLayout(info_layout, 1)
 
-        # 편집 버튼
-        btn_edit = QPushButton("편집")
-        btn_edit.setFixedSize(52, 30)
+        # 이름변경 버튼
+        btn_edit = QPushButton("이름변경")
+        btn_edit.setFixedSize(68, 34)
         btn_edit.setStyleSheet("""
-            QPushButton { background: rgba(59,130,246,0.10); color: #60a5fa;
-                border: 1px solid rgba(59,130,246,0.25); border-radius: 6px;
-                font-size: 11px; font-weight: bold; }
-            QPushButton:hover { background: rgba(59,130,246,0.20); }
+            QPushButton { background: rgba(59,130,246,0.18); color: #93bbfc;
+                border: 1px solid rgba(59,130,246,0.35); border-radius: 8px;
+                font-size: 12px; font-weight: bold; }
+            QPushButton:hover { background: rgba(59,130,246,0.30); color: #bdd4fe; }
         """)
         btn_edit.clicked.connect(self._edit)
         layout.addWidget(btn_edit)
 
         # 삭제 버튼
         btn_del = QPushButton("삭제")
-        btn_del.setFixedSize(52, 30)
+        btn_del.setFixedSize(52, 34)
         btn_del.setStyleSheet("""
-            QPushButton { background: rgba(239,68,68,0.10); color: #f87171;
-                border: 1px solid rgba(239,68,68,0.25); border-radius: 6px;
-                font-size: 11px; font-weight: bold; }
-            QPushButton:hover { background: rgba(239,68,68,0.20); }
+            QPushButton { background: rgba(239,68,68,0.18); color: #fca5a5;
+                border: 1px solid rgba(239,68,68,0.35); border-radius: 8px;
+                font-size: 12px; font-weight: bold; }
+            QPushButton:hover { background: rgba(239,68,68,0.30); color: #fecaca; }
         """)
         btn_del.clicked.connect(self._delete)
         layout.addWidget(btn_del)
@@ -748,6 +748,7 @@ class VisitorManagerView(QWidget):
                     item.widget().deleteLater()
 
             visitors = database.get_all_visitors() or []
+            visitors = sorted(visitors, key=lambda v: v["name"])
             self._reg_empty.setVisible(len(visitors) == 0)
             self._reg_scroll.setVisible(len(visitors) > 0)
             self._reg_count_label.setText(f"등록 {len(visitors)}명")

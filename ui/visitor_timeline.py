@@ -31,8 +31,8 @@ class VisitorTimelineItem(QWidget):
         time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(time_label)
 
-        # 아바타 (원형)
-        avatar = AvatarLabel(36, thumbnail, Q_GREEN if is_registered else Q_AMBER)
+        # 아바타 (원형, 이름 이니셜)
+        avatar = AvatarLabel(36, thumbnail, Q_GREEN if is_registered else Q_AMBER, initial=name[:1] if name else "?")
         layout.addWidget(avatar)
 
         # 이름
@@ -47,19 +47,17 @@ class AvatarLabel(QWidget):
     """원형 아바타"""
 
     def __init__(self, size: int = 36, pixmap: QPixmap = None,
-                 border_color: QColor = Q_GREEN, parent=None):
+                 border_color: QColor = Q_GREEN, initial: str = "?", parent=None):
         super().__init__(parent)
         self._size = size
         self._pixmap = pixmap
         self._border_color = border_color
+        self._initial = initial
         self.setFixedSize(size, size)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        center = self._size / 2
-        radius = center - 1.5
 
         # 보더
         painter.setPen(Qt.PenStyle.NoPen)
@@ -78,55 +76,83 @@ class AvatarLabel(QWidget):
             )
             painter.drawPixmap(2, 2, scaled)
         else:
-            # 기본 아바타 (이니셜 원)
+            # 이니셜 표시
             painter.setBrush(QColor(30, 40, 60))
             painter.drawEllipse(2, 2, self._size - 4, self._size - 4)
-            painter.setPen(QColor(148, 163, 184))
+            painter.setPen(QColor(200, 210, 220))
             from PyQt6.QtGui import QFont
             font = QFont("Pretendard Variable", 12)
             font.setWeight(QFont.Weight.Bold)
             painter.setFont(font)
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "?")
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._initial)
 
         painter.end()
 
 
 class VisitorTimeline(QWidget):
-    """오늘 방문자 타임라인 (스크롤 가능)"""
+    """오늘 방문자 타임라인 (스크롤 가능, 글래스 카드)"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        # 토글 헤더
-        self._toggle_btn = QPushButton("▼ 오늘 방문자")
-        self._toggle_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: none; color: #f1f5f9;
-                font-size: 14px; font-weight: bold; text-align: left;
-                padding: 4px 4px; }
-            QPushButton:hover { color: #00A8FF; }
-        """)
+        # 글래스 카드 프레임
+        from PyQt6.QtWidgets import QFrame
+        self._card = QFrame()
+        self._card.setObjectName("glassCard")
+        card_layout = QVBoxLayout(self._card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
+
+        # 토글 헤더 (cardHeader 스타일로 통일)
+        self._toggle_btn = QPushButton("  ▼  오늘 방문자")
+        self._toggle_btn.setObjectName("cardHeader")
         self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._toggle_btn.clicked.connect(self._toggle)
-        layout.addWidget(self._toggle_btn)
+        card_layout.addWidget(self._toggle_btn)
 
         # 스크롤 영역
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical {
+                width: 8px; background: rgba(255,255,255,0.06);
+                border-radius: 4px; margin: 2px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255,255,255,0.25);
+                border-radius: 3px; min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(0,168,255,0.45);
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0; background: transparent;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: transparent;
+            }
+        """)
 
         self._container = QWidget()
         self._container_layout = QVBoxLayout(self._container)
-        self._container_layout.setContentsMargins(0, 0, 0, 0)
+        self._container_layout.setContentsMargins(8, 0, 8, 8)
         self._container_layout.setSpacing(2)
         self._container_layout.addStretch()
 
         self._scroll.setWidget(self._container)
         self._collapsed = False
-        layout.addWidget(self._scroll, 1)
+        card_layout.addWidget(self._scroll, 1)
+
+        # 펼침: stretch로 공간 채움 / 접힘: 헤더만 남도록
+        self._card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        outer.addWidget(self._card, 1)
 
         # 빈 상태
         self._empty_label = QLabel("방문자가 없습니다")
@@ -137,6 +163,21 @@ class VisitorTimeline(QWidget):
     def _toggle(self):
         self._collapsed = not self._collapsed
         self._scroll.setVisible(not self._collapsed)
+        if self._collapsed:
+            # 접힘: 헤더 높이만 차지
+            h = self._toggle_btn.sizeHint().height() + 2
+            self._card.setFixedHeight(h)
+            self._card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+            self.setFixedHeight(h)
+        else:
+            # 펼침: 남은 공간 채움
+            self._card.setMaximumHeight(16777215)
+            self._card.setMinimumHeight(0)
+            self._card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+            self.setMaximumHeight(16777215)
+            self.setMinimumHeight(0)
+            self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self._update_title()
 
     def _update_title(self):
@@ -148,7 +189,7 @@ class VisitorTimeline(QWidget):
                 count += 1
         arrow = "▶" if self._collapsed else "▼"
         suffix = f" ({count})" if count > 0 else ""
-        self._toggle_btn.setText(f"{arrow} 오늘 방문자{suffix}")
+        self._toggle_btn.setText(f"  {arrow}  오늘 방문자{suffix}")
 
     def add_visitor(self, time_str: str, name: str, thumbnail: QPixmap = None,
                     is_registered: bool = True):

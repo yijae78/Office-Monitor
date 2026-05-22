@@ -227,12 +227,13 @@ QPushButton#topPanelToggle:hover {
    글래스 카드
    ══════════════════════════════════════════ */
 QFrame#glassCard {
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.15);
     border-radius: 12px;
 }
 QFrame#glassCard:hover {
-    background: rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.07);
+    border-color: rgba(255,255,255,0.20);
 }
 
 /* ── 접기/펼치기 카드 헤더 ── */
@@ -308,20 +309,24 @@ QScrollArea {
     border: none;
 }
 QScrollBar:vertical {
-    width: 6px;
-    background: transparent;
+    width: 10px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 5px;
+    margin: 2px;
 }
 QScrollBar::handle:vertical {
-    background: rgba(255,255,255,0.10);
-    border-radius: 3px;
+    background: rgba(255,255,255,0.20);
+    border-radius: 4px;
     min-height: 30px;
 }
 QScrollBar::handle:vertical:hover {
-    background: rgba(255,255,255,0.18);
+    background: rgba(0,168,255,0.40);
 }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0;
+    background: transparent;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     background: transparent;
 }
 QScrollBar:horizontal {

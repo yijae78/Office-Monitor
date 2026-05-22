@@ -197,6 +197,13 @@ class MainWindow(QMainWindow):
         btn_zoom_reset.setToolTip("원본 크기")
         btn_zoom_reset.clicked.connect(lambda: self.camera_widget.zoom_reset())
 
+        # 전체화면 버튼
+        self.btn_fullscreen = QPushButton("⛶")
+        self.btn_fullscreen.setObjectName("zoomBtn")
+        self.btn_fullscreen.setFixedSize(32, 28)
+        self.btn_fullscreen.setToolTip("전체화면 (F11)")
+        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
+
         tb_layout.addWidget(cam_label)
         tb_layout.addWidget(self.combo_camera)
         tb_layout.addSpacing(12)
@@ -209,6 +216,8 @@ class MainWindow(QMainWindow):
         tb_layout.addWidget(self._lbl_zoom)
         tb_layout.addWidget(btn_zoom_in)
         tb_layout.addWidget(btn_zoom_reset)
+        tb_layout.addSpacing(8)
+        tb_layout.addWidget(self.btn_fullscreen)
         top_panel_layout.addWidget(toolbar)
 
         page_layout.addWidget(self.top_panel)
@@ -290,21 +299,21 @@ class MainWindow(QMainWindow):
             QScrollArea { border: none; background: transparent; }
             QScrollArea > QWidget > QWidget { background: transparent; }
             QScrollBar:vertical {
-                width: 8px;
-                background: rgba(255,255,255,0.04);
-                border-radius: 4px;
+                width: 10px; background: rgba(255,255,255,0.06);
+                border-radius: 5px; margin: 2px;
             }
             QScrollBar::handle:vertical {
-                background: rgba(255,255,255,0.15);
-                border-radius: 4px;
-                min-height: 30px;
+                background: rgba(255,255,255,0.25);
+                border-radius: 4px; min-height: 30px;
             }
             QScrollBar::handle:vertical:hover {
-                background: rgba(0,168,255,0.3);
+                background: rgba(0,168,255,0.45);
             }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0; background: transparent;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: transparent;
             }
         """)
         scroll.viewport().setStyleSheet("background: transparent;")
@@ -393,6 +402,19 @@ class MainWindow(QMainWindow):
         """)
         btn_open_folder.clicked.connect(lambda: os.startfile(os.path.join(DATA_DIR, "recordings")))
         rec_header_row.addWidget(btn_open_folder)
+
+        btn_delete_all_rec = QPushButton("🗑 전체삭제")
+        btn_delete_all_rec.setFixedHeight(26)
+        btn_delete_all_rec.setToolTip("모든 녹화 파일 삭제")
+        btn_delete_all_rec.setStyleSheet("""
+            QPushButton { background: rgba(239,68,68,0.10); color: #f87171;
+                border: 1px solid rgba(239,68,68,0.25); border-radius: 6px;
+                font-size: 11px; padding: 2px 8px; }
+            QPushButton:hover { background: rgba(239,68,68,0.20); color: #ff5252; }
+        """)
+        btn_delete_all_rec.clicked.connect(self._delete_all_recordings)
+        rec_header_row.addWidget(btn_delete_all_rec)
+
         rec_lay.addLayout(rec_header_row)
 
         self._rec_list_widget = QWidget()
@@ -414,6 +436,9 @@ class MainWindow(QMainWindow):
         # 방문자 타임라인
         self.timeline = VisitorTimeline()
         layout.addWidget(self.timeline, 1)
+
+        # 타임라인 접힐 때 상단 정렬용 spacer
+        self._timeline_spacer = layout.addStretch()
 
         scroll.setWidget(scroll_content)
         panel_layout.addWidget(scroll)
@@ -517,16 +542,66 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════
 
     def _capture_snapshot(self):
+        """영역 선택 캡처 모드 시작"""
         if self._last_frame is None:
             return
+        self.camera_widget.region_captured.connect(
+            self._save_region_capture, Qt.ConnectionType.SingleShotConnection)
+        self.camera_widget.start_region_select()
+        self.status_bar.showMessage("캡처할 영역을 드래그하세요 (ESC: 취소)")
+
+    def _save_region_capture(self, frame: 'np.ndarray'):
+        """영역 캡처 → 방문자 등록 여부 확인"""
+        from PyQt6.QtWidgets import QMessageBox
+
+        reply = QMessageBox.question(
+            self, "캡처 완료",
+            "방문자로 등록하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._register_from_capture(frame)
+
+    def _register_from_capture(self, frame: 'np.ndarray'):
+        """캡처 이미지에서 얼굴을 감지하여 방문자로 등록"""
+        from PyQt6.QtWidgets import QInputDialog, QMessageBox
+
+        # 이름 먼저 입력
+        name, ok = QInputDialog.getText(self, "방문자 등록", "이름을 입력하세요:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+
+        det = self._detection_thread
+        if not det or not det._app:
+            ToastWidget.show_toast(self, "감지 엔진이 준비되지 않았습니다", False)
+            return
+
+        # 얼굴 감지
+        faces = det._app.get(frame)
+        if not faces:
+            ToastWidget.show_toast(self, "이미지에서 얼굴을 찾을 수 없습니다", False)
+            return
+
+        # 이미지 저장
         ts = time.strftime("%Y%m%d_%H%M%S")
         snap_dir = os.path.join(DATA_DIR, "snapshots")
         os.makedirs(snap_dir, exist_ok=True)
-        path = os.path.join(snap_dir, f"snap_{ts}.png")
-        cv2.imwrite(path, self._last_frame)
-        database.add_snapshot(path)
-        self.status_bar.showMessage(f"캡처 저장: {path}")
-        ToastWidget.show_toast(self, f"캡처 저장됨", True)
+        image_path = os.path.join(snap_dir, f"snap_{ts}.png")
+        cv2.imwrite(image_path, frame)
+
+        # 등록
+        visitor_id = det.register_face(name, faces[0].embedding)
+        database.update_visitor_thumbnail(visitor_id, image_path)
+
+        ToastWidget.show_toast(self, f"'{name}' 등록 완료", True)
+        self.status_bar.showMessage(f"방문자 '{name}' 등록됨")
+
+        # 방문자관리 탭 갱신
+        if hasattr(self, '_visitor_view'):
+            self._visitor_view.refresh()
 
     def _toggle_recording(self):
         if not self._recording_thread:
@@ -884,11 +959,67 @@ class MainWindow(QMainWindow):
     # 단축키
     # ═══════════════════════════════════════
 
+    def _toggle_fullscreen(self):
+        """전체화면 토글"""
+        if self.isFullScreen():
+            self.showNormal()
+            self.btn_fullscreen.setToolTip("전체화면 (F11)")
+        else:
+            self.showFullScreen()
+            self.btn_fullscreen.setToolTip("전체화면 해제 (F11/ESC)")
+
+    def _exit_fullscreen(self):
+        """ESC로 전체화면 해제"""
+        if self.isFullScreen():
+            self.showNormal()
+            self.btn_fullscreen.setToolTip("전체화면 (F11)")
+
+    def _delete_all_recordings(self):
+        """녹화 파일 전체 삭제"""
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "전체 삭제 확인",
+            "모든 녹화 파일을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # 녹화 중이면 먼저 중지
+        if self._recording_thread and self._recording_thread.is_recording:
+            self._recording_thread.stop_recording()
+            self.btn_record.setText("● 녹화")
+            self.btn_record.setProperty("recording", "false")
+            self.btn_pause.setEnabled(False)
+            self.btn_record.style().unpolish(self.btn_record)
+            self.btn_record.style().polish(self.btn_record)
+
+        # DB에서 녹화 목록 가져오기
+        recs = database.execute(
+            "SELECT * FROM recordings", fetch="all") or []
+        deleted = 0
+        for rec in recs:
+            path = rec["file_path"]
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    deleted += 1
+                except Exception:
+                    pass
+
+        # DB 레코드 삭제
+        database.execute("DELETE FROM recordings")
+
+        self._refresh_rec_list()
+        self._update_kpi()
+        ToastWidget.show_toast(self, f"녹화 {deleted}개 파일 삭제 완료", True)
+
     def _setup_shortcuts(self):
         sc = self.config.get("shortcuts", {})
         QShortcut(QKeySequence(sc.get("capture", "Ctrl+Shift+C")), self).activated.connect(self._capture_snapshot)
         QShortcut(QKeySequence(sc.get("record_toggle", "Ctrl+R")), self).activated.connect(self._toggle_recording)
         QShortcut(QKeySequence(sc.get("record_pause", "Ctrl+P")), self).activated.connect(self._toggle_pause)
+        QShortcut(QKeySequence("F11"), self).activated.connect(self._toggle_fullscreen)
+        QShortcut(QKeySequence("Escape"), self).activated.connect(self._exit_fullscreen)
 
     # ═══════════════════════════════════════
     # 상태바

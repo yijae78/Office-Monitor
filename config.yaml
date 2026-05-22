@@ -18,7 +18,7 @@ recording:
   codec: "XVID"
   fps: 15
   segment_minutes: 30
-  auto_start: true
+  auto_start: false
 
 storage:
   data_dir: "C:\\OfficeMonitor"
