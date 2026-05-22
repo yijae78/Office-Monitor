@@ -6,8 +6,7 @@ import numpy as np
 import random
 from datetime import datetime, timedelta
 import database
-
-DATA_DIR = r"C:\OfficeMonitor"
+from paths import DATA_DIR
 
 DEMO_NAMES = ["김철수", "이영희", "박민준", "최수진", "정하늘"]
 DEMO_COLORS = [

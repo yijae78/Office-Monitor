@@ -2,8 +2,11 @@
 
 import cv2
 import time
+import logging
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
+
+logger = logging.getLogger(__name__)
 
 
 class CameraThread(QThread):
@@ -40,28 +43,32 @@ class CameraThread(QThread):
         fps_timer = time.time()
 
         while self._running:
-            ret, frame = self._cap.read()
-            if not ret:
-                self.camera_status.emit("카메라 프레임 읽기 실패", False)
+            try:
+                ret, frame = self._cap.read()
+                if not ret:
+                    self.camera_status.emit("카메라 프레임 읽기 실패", False)
+                    time.sleep(0.5)
+                    # 재연결 시도
+                    self._cap.release()
+                    self._cap = self._try_open_camera()
+                    if self._cap is None:
+                        self.camera_status.emit("카메라 재연결 실패", False)
+                        break
+                    continue
+
+                timestamp = time.time()
+                self.frame_ready.emit(frame, timestamp)
+
+                # FPS 계산
+                frame_count += 1
+                elapsed = timestamp - fps_timer
+                if elapsed >= 1.0:
+                    self._actual_fps = frame_count / elapsed
+                    frame_count = 0
+                    fps_timer = timestamp
+            except Exception as e:
+                logger.error("프레임 처리 오류: %s", e)
                 time.sleep(0.5)
-                # 재연결 시도
-                self._cap.release()
-                self._cap = self._try_open_camera()
-                if self._cap is None:
-                    self.camera_status.emit("카메라 재연결 실패", False)
-                    break
-                continue
-
-            timestamp = time.time()
-            self.frame_ready.emit(frame, timestamp)
-
-            # FPS 계산
-            frame_count += 1
-            elapsed = timestamp - fps_timer
-            if elapsed >= 1.0:
-                self._actual_fps = frame_count / elapsed
-                frame_count = 0
-                fps_timer = timestamp
 
             # CPU 부하 제한 (~30fps)
             time.sleep(0.01)

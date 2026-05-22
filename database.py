@@ -2,10 +2,12 @@
 
 import sqlite3
 import os
+import logging
 import threading
 from datetime import datetime
+from paths import DB_PATH
 
-DB_PATH = r"C:\OfficeMonitor\data\monitor.db"
+logger = logging.getLogger(__name__)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -92,16 +94,19 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_visit_logs_visitor ON visit_logs(visitor_id);
         CREATE INDEX IF NOT EXISTS idx_embeddings_visitor ON face_embeddings(visitor_id);
     """)
-    # 기존 DB 마이그레이션
-    for stmt in [
+    # 기존 DB 마이그레이션 (컬럼 존재 시 무시)
+    migrations = [
         "ALTER TABLE visitors ADD COLUMN thumbnail_path TEXT",
         "ALTER TABLE face_embeddings ADD COLUMN quality REAL DEFAULT 0.0",
         "ALTER TABLE visitors ADD COLUMN status TEXT DEFAULT 'active'",
-    ]:
+    ]
+    for stmt in migrations:
         try:
             conn.execute(stmt)
-        except Exception:
-            pass
+            logger.info("마이그레이션 적용: %s", stmt)
+        except Exception as e:
+            if "duplicate column" not in str(e).lower():
+                logger.warning("마이그레이션 실패: %s — %s", stmt, e)
     conn.close()
 
 

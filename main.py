@@ -2,6 +2,8 @@
 
 import sys
 import os
+import traceback
+import logging
 import yaml
 import ctypes
 
@@ -10,12 +12,9 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PROJECT_DIR)
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
+from paths import DATA_DIR, CRASH_LOG, setup_logging
 from ui.main_window import MainWindow
-
-
-DATA_DIR = r"C:\OfficeMonitor"
 
 
 def ensure_directories():
@@ -43,7 +42,24 @@ def load_config() -> dict:
     return {}
 
 
+def _global_exception_handler(exc_type, exc_value, exc_tb):
+    """처리되지 않은 예외를 로그 파일에 기록 (크래시 방지)"""
+    msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    try:
+        with open(CRASH_LOG, "a", encoding="utf-8") as f:
+            f.write(f"\n{'='*60}\n")
+            f.write(f"{__import__('datetime').datetime.now()}\n")
+            f.write(msg)
+    except Exception:
+        pass
+    logging.getLogger(__name__).critical("치명적 오류:\n%s", msg)
+
+
 def main():
+    # 로깅 + 전역 예외 핸들러 설치
+    setup_logging()
+    sys.excepthook = _global_exception_handler
+
     # Windows 작업표시줄 아이콘 표시를 위한 AppUserModelID
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("OfficeMonitor.App")
 

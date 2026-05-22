@@ -1,16 +1,19 @@
 """방문자 관리 뷰 — 자동 캡처 + 등록 + 휴지통 통합"""
 
 import os
+import logging
 import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QLineEdit, QInputDialog, QFileDialog,
     QSizePolicy, QMessageBox, QStackedWidget, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 
 import database
+
+logger = logging.getLogger(__name__)
 from .flow_layout import FlowLayout
 
 _INPUT_DIALOG_STYLE = """
@@ -909,9 +912,8 @@ class VisitorManagerView(QWidget):
                 layout.addWidget(grid_widget)
 
             layout.addStretch()
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            logger.exception("등록된 방문자 로드 오류")
 
     def _refresh_deleted_visitors(self):
         """삭제된 방문자 탭 갱신"""

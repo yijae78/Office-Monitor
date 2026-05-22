@@ -2,6 +2,7 @@
 
 import os
 import time
+import logging
 import cv2
 import numpy as np
 from datetime import datetime
@@ -11,8 +12,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QFrame, QStatusBar, QComboBox, QStackedWidget,
     QSizePolicy, QFileDialog, QSystemTrayIcon, QMenu, QApplication,
 )
-from PyQt6.QtCore import Qt, QTimer, QSize, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont, QIcon, QShortcut, QKeySequence, QPixmap
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QIcon, QShortcut, QKeySequence, QPixmap
 
 from .camera_widget import CameraWidget
 from .styles import MAIN_STYLE
@@ -23,9 +24,9 @@ from .design_tokens import Q_CYAN, Q_GREEN, Q_RED, Q_AMBER
 from .toast_widget import ToastWidget
 
 import database
+from paths import DATA_DIR
 
-
-DATA_DIR = r"C:\OfficeMonitor"
+logger = logging.getLogger(__name__)
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -521,10 +522,15 @@ class MainWindow(QMainWindow):
         self.lbl_face_count.setText(f"감지된 얼굴: {len(faces)}")
         self.kpi_faces.set_value(str(len(faces)))
 
-    def _on_visit_logged(self, name: str, is_registered: bool):
-        if is_registered:
-            now = datetime.now().strftime("%H:%M")
-            self.timeline.add_visitor(now, name, is_registered=True)
+    def _on_visit_logged(self, name: str, is_registered: bool, thumb_path: str):
+        now = datetime.now().strftime("%H:%M")
+        thumb_pix = None
+        if thumb_path and os.path.exists(thumb_path):
+            thumb_pix = QPixmap(thumb_path)
+        self.timeline.add_visitor(
+            now, name, thumbnail=thumb_pix,
+            is_registered=is_registered, thumbnail_path=thumb_path,
+        )
         self._update_kpi()
 
         # 토스트 알림
@@ -753,8 +759,7 @@ class MainWindow(QMainWindow):
             ToastWidget.show_toast(self, "새로고침 완료", True)
         except Exception as e:
             self.status_bar.showMessage(f"새로고침 오류: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("새로고침 오류")
 
     def _open_settings(self):
         """설정 다이얼로그 열기"""
@@ -806,19 +811,24 @@ class MainWindow(QMainWindow):
         self.lbl_cam_fps.setText(f"FPS: {self._fps_display}")
 
     def _load_today_timeline(self):
-        """DB에서 오늘 방문 기록을 타임라인에 로드 (등록된 사람만)"""
+        """DB에서 오늘 방문 기록을 타임라인에 로드"""
         try:
             visits = database.get_today_visits() or []
             for v in reversed(visits):
-                if not v["is_registered"]:
-                    continue
                 ts = v["timestamp"]
                 time_str = ts[11:16] if len(ts) >= 16 else ts
-                name = v["visitor_name"] or "미등록"
-                self.timeline.add_visitor(time_str, name, is_registered=True)
+                name = v["visitor_name"] or "방문자"
+                is_reg = bool(v["is_registered"])
+                tp = v["thumbnail_path"] if "thumbnail_path" in v.keys() else None
+                thumb_pix = None
+                if tp and os.path.exists(tp):
+                    thumb_pix = QPixmap(tp)
+                self.timeline.add_visitor(
+                    time_str, name, thumbnail=thumb_pix,
+                    is_registered=is_reg, thumbnail_path=tp,
+                )
         except Exception:
-            import traceback
-            traceback.print_exc()
+            logger.exception("타임라인 로드 오류")
 
     def _update_kpi(self):
         visits = database.get_today_visits()
@@ -895,8 +905,8 @@ class MainWindow(QMainWindow):
             database.execute(
                 "DELETE FROM recordings WHERE start_time < datetime('now','localtime',?)",
                 (f"-{days} days",))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("데이터 자동 정리 오류: %s", e)
 
     def _cleanup_bad_faces(self):
         """불량 캡처 이미지 자동 삭제"""
@@ -1097,6 +1107,13 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════
 
     def closeEvent(self, event):
+        # 타이머 정지 (메모리 누수 방지)
+        for timer_name in ('_fps_timer', '_kpi_timer', '_cleanup_timer', '_bad_face_timer'):
+            timer = getattr(self, timer_name, None)
+            if timer:
+                timer.stop()
+
+        # 스레드 정지
         if self._camera_thread:
             self._camera_thread.stop()
         if self._detection_thread:

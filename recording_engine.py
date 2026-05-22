@@ -3,10 +3,14 @@
 import cv2
 import os
 import time
+import logging
 import numpy as np
 import threading
 from PyQt6.QtCore import QThread, pyqtSignal
 import database
+from paths import DATA_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class RecordingThread(QThread):
@@ -21,7 +25,7 @@ class RecordingThread(QThread):
         self._codec = rec_cfg.get("codec", "XVID")
         self._fps = rec_cfg.get("fps", 15)
         self._segment_minutes = rec_cfg.get("segment_minutes", 30)
-        self._data_dir = config.get("storage", {}).get("data_dir", r"C:\OfficeMonitor")
+        self._data_dir = DATA_DIR
 
         self._running = False
         self._recording = False
@@ -82,6 +86,10 @@ class RecordingThread(QThread):
         self._writer = cv2.VideoWriter(
             self._current_path, fourcc, self._fps, self._resolution
         )
+        if not self._writer.isOpened():
+            logger.error("VideoWriter 초기화 실패: %s", self._current_path)
+            self._writer = None
+            return
         self._db_id = database.add_recording(self._current_path, ts)
         self._segment_start = time.time()
 
@@ -89,9 +97,12 @@ class RecordingThread(QThread):
         if self._writer and self._writer.isOpened():
             self._writer.release()
             if self._current_path and os.path.exists(self._current_path):
-                size = os.path.getsize(self._current_path)
-                if self._db_id:
-                    database.finish_recording(self._db_id, size)
+                try:
+                    size = os.path.getsize(self._current_path)
+                    if self._db_id:
+                        database.finish_recording(self._db_id, size)
+                except OSError as e:
+                    logger.warning("녹화 파일 크기 확인 실패: %s", e)
         self._writer = None
 
     def run(self):
@@ -99,23 +110,26 @@ class RecordingThread(QThread):
         interval = 1.0 / self._fps
 
         while self._running:
-            if self._recording and not self._paused:
-                with self._frame_lock:
-                    frame = self._frame
+            try:
+                if self._recording and not self._paused:
+                    with self._frame_lock:
+                        frame = self._frame
 
-                if frame is not None and self._writer and self._writer.isOpened():
-                    self._writer.write(frame)
+                    if frame is not None and self._writer and self._writer.isOpened():
+                        self._writer.write(frame)
 
-                # 세그먼트 분할
-                if time.time() - self._segment_start > self._segment_minutes * 60:
-                    self._open_new_segment()
+                    # 세그먼트 분할
+                    if time.time() - self._segment_start > self._segment_minutes * 60:
+                        self._open_new_segment()
 
-                # 경과 시간
-                elapsed = self._elapsed + (time.time() - self._start_time)
-                h = int(elapsed // 3600)
-                m = int((elapsed % 3600) // 60)
-                s = int(elapsed % 60)
-                self.time_updated.emit(f"{h:02d}:{m:02d}:{s:02d}")
+                    # 경과 시간
+                    elapsed = self._elapsed + (time.time() - self._start_time)
+                    h = int(elapsed // 3600)
+                    m = int((elapsed % 3600) // 60)
+                    s = int(elapsed % 60)
+                    self.time_updated.emit(f"{h:02d}:{m:02d}:{s:02d}")
+            except Exception as e:
+                logger.error("녹화 루프 오류: %s", e)
 
             time.sleep(interval)
 

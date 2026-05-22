@@ -3,11 +3,15 @@
 
 import time
 import os
+import logging
 import cv2
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 from insightface.app import FaceAnalysis
 import database
+from paths import PENDING_FACES_DIR, THUMBNAILS_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class DetectionThread(QThread):
@@ -21,7 +25,7 @@ class DetectionThread(QThread):
     """
 
     faces_detected = pyqtSignal(list)   # [{bbox, name, confidence, track_id, ...}]
-    visit_logged = pyqtSignal(str, bool)  # name, is_registered
+    visit_logged = pyqtSignal(str, bool, str)  # name, is_registered, thumbnail_path
     face_captured = pyqtSignal(int)  # pending_face_id
 
     MAX_EMBEDDINGS_PER_VISITOR = 10
@@ -77,26 +81,34 @@ class DetectionThread(QThread):
     def run(self):
         self._running = True
 
-        # InsightFace 초기화
-        self._app = FaceAnalysis(name=self._model_name, providers=["CPUExecutionProvider"])
-        self._app.prepare(ctx_id=-1, det_size=self._det_size)
+        try:
+            # InsightFace 초기화
+            self._app = FaceAnalysis(name=self._model_name, providers=["CPUExecutionProvider"])
+            self._app.prepare(ctx_id=-1, det_size=self._det_size)
+        except Exception as e:
+            logger.error("InsightFace 초기화 실패: %s", e)
+            return
 
         # YOLO 초기화
         try:
             from ultralytics import YOLO
             self._yolo = YOLO("yolo11n.pt")
-        except Exception:
+        except Exception as e:
+            logger.warning("YOLO 로드 실패 (폴백 모드): %s", e)
             self._yolo = None
 
         self._load_known_faces()
         self._load_pending_embeddings()
 
         while self._running:
-            with self._frame_lock:
-                frame = self._frame
+            try:
+                with self._frame_lock:
+                    frame = self._frame
 
-            if frame is not None:
-                self._detect(frame)
+                if frame is not None:
+                    self._detect(frame)
+            except Exception as e:
+                logger.error("감지 루프 오류: %s", e)
 
             time.sleep(self._interval)
 
@@ -110,8 +122,8 @@ class DetectionThread(QThread):
                 if vid not in self._known_faces:
                     self._known_faces[vid] = {"name": row["name"], "embeddings": []}
                 self._known_faces[vid]["embeddings"].append(emb)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("알려진 얼굴 로드 실패: %s", e)
 
     def reload_known_faces(self):
         self._load_known_faces()
@@ -130,7 +142,11 @@ class DetectionThread(QThread):
         self._finalize_candidates(now)
 
     def _detect_with_tracking(self, frame: np.ndarray, now: float):
-        """YOLO + ByteTrack + InsightFace 통합 파이프라인"""
+        """YOLO + ByteTrack + InsightFace 통합 파이프라인
+
+        개선: InsightFace를 전체 프레임에서 1회 실행 후
+        각 얼굴을 YOLO track에 공간 매칭 → 크롭 오염 방지
+        """
         # 1단계: YOLO 사람 감지 + ByteTrack 추적
         try:
             track_results = self._yolo.track(
@@ -142,119 +158,143 @@ class DetectionThread(QThread):
             self._detect_face_only(frame, now)
             return
 
-        results = []
+        tracks = []  # [(track_id, person_bbox, conf)]
         active_track_ids = set()
 
         if track_results and track_results[0].boxes is not None and len(track_results[0].boxes):
             boxes = track_results[0].boxes
-
             for i in range(len(boxes)):
                 bbox = boxes.xyxy[i].cpu().numpy().astype(int).tolist()
                 conf = float(boxes.conf[i].cpu())
                 track_id = int(boxes.id[i].cpu()) if boxes.id is not None else -1
-
                 active_track_ids.add(track_id)
+                tracks.append((track_id, bbox, conf))
 
-                # 2단계: 사람 영역 내에서 InsightFace 얼굴 감지
-                h, w = frame.shape[:2]
-                px1 = max(0, bbox[0])
-                py1 = max(0, bbox[1])
-                px2 = min(w, bbox[2])
-                py2 = min(h, bbox[3])
-                person_crop = frame[py1:py2, px1:px2]
+        # 2단계: InsightFace 전체 프레임에서 1회 실행
+        all_faces = []
+        try:
+            all_faces = self._app.get(frame)
+        except Exception as e:
+            logger.debug("InsightFace 전체 프레임 감지 오류: %s", e)
 
-                name = self._track_names.get(track_id, "미등록")
-                visitor_id = self._track_visitors.get(track_id)
-                is_registered = self._track_registered.get(track_id, False)
-                embedding = None
-                best_sim = 0.0
+        # 3단계: 각 얼굴 → 가장 가까운 YOLO person bbox에 1:1 매칭
+        track_face = {}  # track_id → face 객체
+        for face in all_faces:
+            if face.det_score < self._score_threshold:
+                continue
+            fb = face.bbox.astype(int)
+            face_cx = (fb[0] + fb[2]) / 2
+            face_cy = (fb[1] + fb[3]) / 2
 
-                face_abs_bbox = None  # 얼굴 영역 bbox (전체 프레임 좌표)
+            best_tid = None
+            best_dist = float('inf')
+            for track_id, pbbox, _ in tracks:
+                if pbbox[0] <= face_cx <= pbbox[2] and pbbox[1] <= face_cy <= pbbox[3]:
+                    pcx = (pbbox[0] + pbbox[2]) / 2
+                    pcy = (pbbox[1] + pbbox[3]) / 2
+                    dist = ((face_cx - pcx) ** 2 + (face_cy - pcy) ** 2) ** 0.5
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_tid = track_id
 
-                if person_crop.size > 0:
-                    try:
-                        faces = self._app.get(person_crop)
-                        if faces:
-                            face = max(faces, key=lambda f: f.det_score)
-                            # 얼굴 bbox를 전체 프레임 좌표로 변환
-                            fb = face.bbox.astype(int)
-                            face_abs_bbox = [
-                                fb[0] + px1, fb[1] + py1,
-                                fb[2] + px1, fb[3] + py1,
-                            ]
-                            if face.det_score >= self._score_threshold and face.embedding is not None:
-                                embedding = face.embedding
-                                # 얼굴 매칭
-                                matched_name, matched_vid, matched_sim, matched_reg = self._match_face(embedding)
-                                best_sim = matched_sim
+            if best_tid is not None:
+                if best_tid in track_face:
+                    if track_face[best_tid].det_score < face.det_score:
+                        track_face[best_tid] = face
+                else:
+                    track_face[best_tid] = face
 
-                                if matched_reg:
-                                    name = matched_name
-                                    visitor_id = matched_vid
-                                    is_registered = True
+        # 4단계: 각 track 처리 — ID 매칭 + 결과 생성
+        results = []
+        for track_id, person_bbox, person_conf in tracks:
+            face = track_face.get(track_id)
 
-                                    # track_id에 이름 바인딩
-                                    self._track_names[track_id] = name
-                                    self._track_visitors[track_id] = visitor_id
-                                    self._track_registered[track_id] = True
+            name = self._track_names.get(track_id, "미등록")
+            visitor_id = self._track_visitors.get(track_id)
+            is_registered = self._track_registered.get(track_id, False)
+            face_abs_bbox = None
+            embedding = None
+            best_sim = 0.0
 
-                                    if self._auto_augment:
-                                        q = self._compute_quality_score(
-                                            frame, face_abs_bbox,
-                                            float(face.det_score), face)
-                                        self._try_augment_embedding(visitor_id, embedding, q)
-                                else:
-                                    # 미등록이지만 이전에 바인딩된 이름이 있으면 유지
-                                    if track_id not in self._track_names:
-                                        self._track_names[track_id] = "미등록"
-                                        self._track_visitors[track_id] = None
-                                        self._track_registered[track_id] = False
+            if face is not None:
+                face_abs_bbox = face.bbox.astype(int).tolist()
 
-                                    # 미등록 얼굴 → 최고 프레임 수집
-                                    if not is_registered:
-                                        self._notify_new_face(
-                                            frame, face_abs_bbox, embedding, now,
-                                            det_score=float(face.det_score),
-                                            track_id=track_id, face=face)
-                    except Exception:
-                        pass
+                if face.embedding is not None:
+                    embedding = face.embedding
+                    matched_name, matched_vid, matched_sim, matched_reg = self._match_face(embedding)
+                    best_sim = matched_sim
 
-                # 얼굴 bbox가 있으면 얼굴만, 없으면 표시 안 함
-                if face_abs_bbox is None:
-                    continue
+                    if matched_reg:
+                        name = matched_name
+                        visitor_id = matched_vid
+                        is_registered = True
+                        self._track_names[track_id] = name
+                        self._track_visitors[track_id] = visitor_id
+                        self._track_registered[track_id] = True
 
-                results.append({
-                    "bbox": face_abs_bbox,
-                    "name": name,
-                    "confidence": conf,
-                    "similarity": float(best_sim),
-                    "is_registered": is_registered,
-                    "visitor_id": visitor_id,
-                    "track_id": track_id,
-                    "embedding": embedding,
-                    "type": "person",
-                })
+                        if self._auto_augment:
+                            q = self._compute_quality_score(
+                                frame, face_abs_bbox,
+                                float(face.det_score), face)
+                            self._try_augment_embedding(visitor_id, embedding, q)
+                    else:
+                        if track_id not in self._track_names:
+                            self._track_names[track_id] = "미등록"
+                            self._track_visitors[track_id] = None
+                            self._track_registered[track_id] = False
 
-                # 쿨다운 체크 후 방문 로그
-                cooldown_key = visitor_id if visitor_id else f"track_{track_id}"
-                last_seen = self._cooldown_map.get(cooldown_key, 0)
-                if now - last_seen > self._cooldown:
-                    self._cooldown_map[cooldown_key] = now
-                    thumb_path = self._save_thumbnail(frame, bbox)
-                    database.add_visit_log(
-                        visitor_id=visitor_id,
-                        visitor_name=name,
-                        confidence=conf,
-                        thumbnail_path=thumb_path,
-                        is_registered=is_registered,
-                    )
-                    self.visit_logged.emit(name, is_registered)
+                        # 미등록 얼굴 → 조용히 최고 프레임 수집
+                        if not is_registered:
+                            self._notify_new_face(
+                                frame, face_abs_bbox, embedding, now,
+                                det_score=float(face.det_score),
+                                track_id=track_id, face=face)
 
-        # 사라진 track_id 정리 (30초 후)
-        for tid in list(self._track_names.keys()):
-            if tid not in active_track_ids:
-                # 나중에 같은 ID가 재사용될 수 있으므로 바로 삭제하지 않음
-                pass
+            if face_abs_bbox is None:
+                continue
+
+            results.append({
+                "bbox": face_abs_bbox,
+                "name": name,
+                "confidence": person_conf,
+                "similarity": float(best_sim),
+                "is_registered": is_registered,
+                "visitor_id": visitor_id,
+                "track_id": track_id,
+                "embedding": embedding,
+                "type": "person",
+            })
+
+            # 방문 로그 (등록자: visitor_id 기준, 미등록자: track_id 기준 쿨다운)
+            cooldown_key = visitor_id if visitor_id else f"track_{track_id}"
+            last_seen = self._cooldown_map.get(cooldown_key, 0)
+            if now - last_seen > self._cooldown:
+                self._cooldown_map[cooldown_key] = now
+                thumb_path = self._save_thumbnail(frame, face_abs_bbox)
+                database.add_visit_log(
+                    visitor_id=visitor_id,
+                    visitor_name=name,
+                    confidence=person_conf,
+                    thumbnail_path=thumb_path,
+                    is_registered=is_registered,
+                )
+                self.visit_logged.emit(name, is_registered, thumb_path)
+
+        # 사라진 track_id 정리
+        if not hasattr(self, '_track_last_seen'):
+            self._track_last_seen = {}
+        for tid in active_track_ids:
+            self._track_last_seen[tid] = now
+        stale_tids = [
+            tid for tid in list(self._track_names.keys())
+            if tid not in active_track_ids
+            and now - self._track_last_seen.get(tid, 0) > 30
+        ]
+        for tid in stale_tids:
+            self._track_names.pop(tid, None)
+            self._track_visitors.pop(tid, None)
+            self._track_registered.pop(tid, None)
+            self._track_last_seen.pop(tid, None)
 
         self.faces_detected.emit(results)
 
@@ -262,7 +302,8 @@ class DetectionThread(QThread):
         """YOLO 없이 InsightFace만 사용하는 폴백 모드"""
         try:
             faces = self._app.get(frame)
-        except Exception:
+        except Exception as e:
+            logger.debug("InsightFace 폴백 감지 오류: %s", e)
             return
 
         results = []
@@ -273,6 +314,10 @@ class DetectionThread(QThread):
             bbox = face.bbox.astype(int).tolist()
             embedding = face.embedding
             name, visitor_id, best_sim, is_registered = self._match_face(embedding)
+
+            if is_registered and self._auto_augment and embedding is not None:
+                q = self._compute_quality_score(frame, bbox, float(face.det_score), face)
+                self._try_augment_embedding(visitor_id, embedding, q)
 
             results.append({
                 "bbox": bbox,
@@ -286,10 +331,6 @@ class DetectionThread(QThread):
                 "type": "face",
             })
 
-            if is_registered and self._auto_augment and embedding is not None:
-                q = self._compute_quality_score(frame, bbox, float(face.det_score), face)
-                self._try_augment_embedding(visitor_id, embedding, q)
-
             cooldown_key = visitor_id if visitor_id else f"unknown_{bbox[0]}_{bbox[1]}"
             last_seen = self._cooldown_map.get(cooldown_key, 0)
             if now - last_seen > self._cooldown:
@@ -300,7 +341,7 @@ class DetectionThread(QThread):
                     confidence=float(face.det_score),
                     thumbnail_path=thumb_path, is_registered=is_registered,
                 )
-                self.visit_logged.emit(name, is_registered)
+                self.visit_logged.emit(name, is_registered, thumb_path)
 
             if not is_registered and embedding is not None:
                 self._notify_new_face(frame, bbox, embedding, now,
@@ -311,7 +352,7 @@ class DetectionThread(QThread):
 
     def _match_face(self, embedding: np.ndarray):
         """임베딩 매칭 → (name, visitor_id, best_sim, is_registered)"""
-        name = "미등록"
+        name = "방문자"
         visitor_id = None
         is_registered = False
         best_sim = 0.0
@@ -362,8 +403,8 @@ class DetectionThread(QThread):
             for row in rows:
                 emb = np.frombuffer(row["embedding"], dtype=np.float32).copy()
                 self._pending_embeddings.append((row["id"], emb))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("pending 임베딩 로드 실패: %s", e)
 
     # ═══════════════════════════════════════════
     # 최고 프레임 선별 시스템 (3초 수집 → 최고 1장 저장)
@@ -573,7 +614,7 @@ class DetectionThread(QThread):
         if cv2.Laplacian(gray, cv2.CV_64F).var() < self.MIN_BLUR_SCORE * 0.5:
             return
 
-        pending_dir = r"C:\OfficeMonitor\data\pending_faces"
+        pending_dir = PENDING_FACES_DIR
         os.makedirs(pending_dir, exist_ok=True)
         ts = time.strftime("%Y%m%d_%H%M%S")
         img_path = os.path.join(pending_dir, f"face_{ts}_{bbox[0]}.jpg")
@@ -656,7 +697,7 @@ class DetectionThread(QThread):
         crop = frame[y1:y2, x1:x2]
 
         ts = time.strftime("%Y%m%d_%H%M%S")
-        thumb_dir = r"C:\OfficeMonitor\data\thumbnails"
+        thumb_dir = THUMBNAILS_DIR
         os.makedirs(thumb_dir, exist_ok=True)
         path = os.path.join(thumb_dir, f"thumb_{ts}_{bbox[0]}.jpg")
         cv2.imwrite(path, crop, [cv2.IMWRITE_JPEG_QUALITY, 85])

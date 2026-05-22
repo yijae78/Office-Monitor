@@ -1,8 +1,9 @@
 """오늘 방문자 타임라인 위젯"""
 
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
-    QPushButton, QMessageBox,
+    QPushButton, QMessageBox, QDialog,
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QPixmap, QPainter, QPainterPath, QColor
@@ -10,15 +11,59 @@ from PyQt6.QtGui import QPixmap, QPainter, QPainterPath, QColor
 from .design_tokens import Q_GREEN, Q_AMBER, Q_TEXT_SECONDARY, SPACE_2, SPACE_3
 
 
+class ThumbnailPopup(QDialog):
+    """방문자 썸네일 팝업 다이얼로그"""
+
+    def __init__(self, name: str, time_str: str, thumb_path: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"{name} — {time_str}")
+        self.setStyleSheet("""
+            QDialog { background: #0c111b; }
+            QLabel { color: #f1f5f9; }
+        """)
+        self.setMinimumSize(240, 200)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        # 이미지
+        img_label = QLabel()
+        img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if thumb_path and os.path.exists(thumb_path):
+            pix = QPixmap(thumb_path)
+            scaled = pix.scaled(
+                320, 320,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            img_label.setPixmap(scaled)
+        else:
+            img_label.setText("사진 없음")
+            img_label.setStyleSheet("color: #64748b; font-size: 14px;")
+        layout.addWidget(img_label)
+
+        # 이름 + 시간
+        info = QLabel(f"{name}  ·  {time_str}")
+        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        info.setStyleSheet("color: #94a3b8; font-size: 13px;")
+        layout.addWidget(info)
+
+        self.adjustSize()
+
+
 class VisitorTimelineItem(QWidget):
     """타임라인 개별 항목"""
 
     def __init__(self, time_str: str, name: str, thumbnail: QPixmap = None,
-                 is_registered: bool = True, parent=None):
+                 is_registered: bool = True, thumbnail_path: str = None, parent=None):
         super().__init__(parent)
         self.setObjectName("timelineItem")
         self.setFixedHeight(48)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._name = name
+        self._time_str = time_str
+        self._thumbnail_path = thumbnail_path
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
@@ -41,6 +86,12 @@ class VisitorTimelineItem(QWidget):
             f"color: {'#f1f5f9' if is_registered else '#fbbf24'}; font-size: 13px; font-weight: bold;"
         )
         layout.addWidget(name_label, 1)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._thumbnail_path:
+            popup = ThumbnailPopup(self._name, self._time_str, self._thumbnail_path, self)
+            popup.exec()
+        super().mousePressEvent(event)
 
 
 class AvatarLabel(QWidget):
@@ -242,10 +293,10 @@ class VisitorTimeline(QWidget):
         ToastWidget.show_toast(self.window(), "오늘 방문 기록 초기화됨", True)
 
     def add_visitor(self, time_str: str, name: str, thumbnail: QPixmap = None,
-                    is_registered: bool = True):
+                    is_registered: bool = True, thumbnail_path: str = None):
         """방문자 추가 (최신이 위에)"""
         self._empty_label.hide()
-        item = VisitorTimelineItem(time_str, name, thumbnail, is_registered)
+        item = VisitorTimelineItem(time_str, name, thumbnail, is_registered, thumbnail_path)
         self._container_layout.insertWidget(
             self._container_layout.count() - 1, item
         )

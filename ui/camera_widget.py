@@ -331,9 +331,8 @@ class CameraWidget(QWidget):
                     painter.setPen(color)
                     painter.drawText(bx + 4, by - 6, name)
                 else:
-                    # 미등록자: 붉은 박스만 (이름 없음)
-                    color = QColor(239, 68, 68)
-                    pen = QPen(color, 2)
+                    # 미등록자: 얇은 앰버 박스 (텍스트 없음)
+                    pen = QPen(QColor(245, 158, 11, 140), 1)
                     painter.setPen(pen)
                     painter.drawRect(bx, by, bw, bh)
 
