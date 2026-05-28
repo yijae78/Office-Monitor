@@ -55,8 +55,11 @@ class ThumbnailPopup(QDialog):
         info.setStyleSheet("color: #94a3b8; font-size: 13px;")
         layout.addWidget(info)
 
-        # 미등록자일 때만 등록 버튼 표시
+        # 미등록자일 때만 등록/삭제 버튼 표시
         if not is_registered and thumb_path:
+            btn_row = QHBoxLayout()
+            btn_row.setSpacing(8)
+
             register_btn = QPushButton("방문자로 등록")
             register_btn.setStyleSheet("""
                 QPushButton {
@@ -73,9 +76,30 @@ class ThumbnailPopup(QDialog):
             """)
             register_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             register_btn.clicked.connect(self._do_register)
-            layout.addWidget(register_btn)
+            btn_row.addWidget(register_btn)
+
+            delete_btn = QPushButton("삭제")
+            delete_btn.setStyleSheet("""
+                QPushButton {
+                    background: rgba(239,68,68,0.15);
+                    color: #f87171; border: 1px solid rgba(239,68,68,0.30);
+                    border-radius: 10px;
+                    padding: 10px 16px; font-size: 14px; font-weight: bold;
+                    min-height: 36px;
+                }
+                QPushButton:hover {
+                    background: rgba(239,68,68,0.30);
+                    color: #fca5a5;
+                }
+            """)
+            delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            delete_btn.clicked.connect(self._do_delete)
+            btn_row.addWidget(delete_btn)
+
+            layout.addLayout(btn_row)
 
         self.adjustSize()
+        self._deleted = False
 
     def _do_register(self):
         """미등록 얼굴을 방문자로 등록"""
@@ -133,6 +157,11 @@ class ThumbnailPopup(QDialog):
         self._registered_name = name
         self.accept()
 
+    def _do_delete(self):
+        """타임라인에서 이 미등록 방문 기록 삭제"""
+        self._deleted = True
+        self.accept()
+
 
 class VisitorTimelineItem(QWidget):
     """타임라인 개별 항목"""
@@ -184,6 +213,10 @@ class VisitorTimelineItem(QWidget):
                 from .toast_widget import ToastWidget
                 ToastWidget.show_toast(self.window(), f"'{popup._registered_name}' 등록 완료", True)
 
+            # 삭제 요청 시 타임라인에서 제거
+            elif getattr(popup, '_deleted', False):
+                self._remove_from_timeline()
+
         super().mousePressEvent(event)
 
     def _mark_as_registered(self, name: str):
@@ -197,6 +230,21 @@ class VisitorTimelineItem(QWidget):
         self._avatar._border_color = Q_GREEN
         self._avatar._initial = name[:1] if name else "?"
         self._avatar.update()
+
+    def _remove_from_timeline(self):
+        """타임라인에서 이 아이템 제거 + DB 방문 기록 삭제"""
+        import database
+        # 썸네일 경로로 해당 visit_log 삭제
+        if self._thumbnail_path:
+            database.execute(
+                "DELETE FROM visit_logs WHERE thumbnail_path=?",
+                (self._thumbnail_path,),
+            )
+        self.setParent(None)
+        self.deleteLater()
+        from .toast_widget import ToastWidget
+        ToastWidget.show_toast(self.window() if self.window() else None,
+                               "방문 기록 삭제됨", True)
 
 
 class AvatarLabel(QWidget):
