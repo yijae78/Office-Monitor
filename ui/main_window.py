@@ -771,6 +771,8 @@ class MainWindow(QMainWindow):
 
         # 리로드 대상 모듈 (의존 순서: 하위 → 상위)
         reload_targets = [
+            "database",
+            "detection_engine",
             "ui.design_tokens",
             "ui.visitor_timeline",
             "ui.visitor_manager",
