@@ -313,10 +313,16 @@ class CameraWidget(QWidget):
                 bw = int((bbox[2] - bbox[0]) * scale_x)
                 bh = int((bbox[3] - bbox[1]) * scale_y)
 
-                if is_reg and sim >= 0.55:
+                det_type = det.get("type", "")
+                is_body = (det_type == "person_body")
+
+                if is_reg and (sim >= 0.55 or is_body):
                     # 등록자: 녹색 박스 + 이름 라벨
                     color = QColor(34, 197, 94)
-                    pen = QPen(color, 2)
+                    if is_body:
+                        pen = QPen(color, 2, Qt.PenStyle.DashLine)
+                    else:
+                        pen = QPen(color, 2)
                     painter.setPen(pen)
                     painter.drawRect(bx, by, bw, bh)
 
@@ -331,8 +337,12 @@ class CameraWidget(QWidget):
                     painter.setPen(color)
                     painter.drawText(bx + 4, by - 6, name)
                 else:
-                    # 미등록자: 얇은 앰버 박스 (텍스트 없음)
-                    pen = QPen(QColor(245, 158, 11, 140), 1)
+                    # 미등록자: 붉은색 박스
+                    color = QColor(239, 68, 68)
+                    if is_body:
+                        pen = QPen(color, 1, Qt.PenStyle.DashLine)
+                    else:
+                        pen = QPen(color, 2)
                     painter.setPen(pen)
                     painter.drawRect(bx, by, bw, bh)
 

@@ -251,6 +251,18 @@ class DetectionThread(QThread):
                                 track_id=track_id, face=face)
 
             if face_abs_bbox is None:
+                # 얼굴 미검출 — person bbox로 표시 (뒷모습 등)
+                results.append({
+                    "bbox": person_bbox,
+                    "name": name,
+                    "confidence": person_conf,
+                    "similarity": float(best_sim),
+                    "is_registered": is_registered,
+                    "visitor_id": visitor_id,
+                    "track_id": track_id,
+                    "embedding": None,
+                    "type": "person_body",
+                })
                 continue
 
             results.append({
