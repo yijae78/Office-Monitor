@@ -375,6 +375,9 @@ class DetectionThread(QThread):
         if not info:
             return
 
+        # numpy float → Python float 변환 (SQLite BLOB 저장 방지)
+        quality = float(quality)
+
         # 기존 임베딩과 너무 유사하면 스킵 (다양성 확보)
         max_sim = max(self._cosine_sim(embedding, e) for e in info["embeddings"])
         if max_sim > 0.85:
@@ -389,11 +392,17 @@ class DetectionThread(QThread):
         else:
             # 10개 꽉 찼으면: 새 것이 가장 낮은 품질보다 좋을 때만 교체
             lowest = database.get_lowest_quality_embedding(visitor_id)
-            if lowest and quality > lowest["quality"]:
-                database.delete_embedding(lowest["id"])
-                database.add_embedding(visitor_id, emb_bytes, quality)
-                # 메모리 캐시도 갱신
-                self._load_known_faces()
+            if lowest:
+                lowest_q = lowest["quality"]
+                # DB에 BLOB으로 저장된 quality 복구 (numpy.float32 → bytes 문제)
+                if isinstance(lowest_q, bytes):
+                    import struct
+                    lowest_q = struct.unpack('f', lowest_q)[0] if len(lowest_q) == 4 else 0.0
+                if quality > lowest_q:
+                    database.delete_embedding(lowest["id"])
+                    database.add_embedding(visitor_id, emb_bytes, quality)
+                    # 메모리 캐시도 갱신
+                    self._load_known_faces()
 
     def _load_pending_embeddings(self):
         """DB의 pending_faces 임베딩을 캐시로 로드 (중복 방지용)"""

@@ -1,20 +1,24 @@
 """오늘 방문자 타임라인 위젯"""
 
 import os
+import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
-    QPushButton, QMessageBox, QDialog,
+    QPushButton, QMessageBox, QDialog, QInputDialog,
 )
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QPixmap, QPainter, QPainterPath, QColor
 
 from .design_tokens import Q_GREEN, Q_AMBER, Q_TEXT_SECONDARY, SPACE_2, SPACE_3
 
+logger = logging.getLogger(__name__)
+
 
 class ThumbnailPopup(QDialog):
     """방문자 썸네일 팝업 다이얼로그"""
 
-    def __init__(self, name: str, time_str: str, thumb_path: str, parent=None):
+    def __init__(self, name: str, time_str: str, thumb_path: str,
+                 is_registered: bool = True, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"{name} — {time_str}")
         self.setStyleSheet("""
@@ -22,6 +26,8 @@ class ThumbnailPopup(QDialog):
             QLabel { color: #f1f5f9; }
         """)
         self.setMinimumSize(240, 200)
+        self._thumb_path = thumb_path
+        self._registered_name = None  # 등록 완료 시 이름 저장
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -49,7 +55,83 @@ class ThumbnailPopup(QDialog):
         info.setStyleSheet("color: #94a3b8; font-size: 13px;")
         layout.addWidget(info)
 
+        # 미등록자일 때만 등록 버튼 표시
+        if not is_registered and thumb_path:
+            register_btn = QPushButton("방문자로 등록")
+            register_btn.setStyleSheet("""
+                QPushButton {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                        stop:0 #1d6aa5, stop:1 #3b82f6);
+                    color: #fff; border: none; border-radius: 10px;
+                    padding: 10px 20px; font-size: 14px; font-weight: bold;
+                    min-height: 36px;
+                }
+                QPushButton:hover {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                        stop:0 #2563eb, stop:1 #60a5fa);
+                }
+            """)
+            register_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            register_btn.clicked.connect(self._do_register)
+            layout.addWidget(register_btn)
+
         self.adjustSize()
+
+    def _do_register(self):
+        """미등록 얼굴을 방문자로 등록"""
+        dlg = QInputDialog(self)
+        dlg.setWindowTitle("방문자 등록")
+        dlg.setLabelText("이름을 입력하세요:")
+        dlg.setStyleSheet("""
+            QInputDialog { background: #ffffff; }
+            QLabel { color: #0f172a; font-size: 14px; }
+            QLineEdit {
+                background: #ffffff; border: 1px solid #cbd5e1;
+                border-radius: 8px; padding: 8px 12px;
+                font-size: 14px; color: #0f172a; min-height: 32px;
+            }
+            QLineEdit:focus { border-color: #00A8FF; }
+            QPushButton {
+                background: #3b82f6; color: white; border: none;
+                border-radius: 6px; padding: 8px 20px; font-size: 13px;
+            }
+            QPushButton:hover { background: #2563eb; }
+        """)
+        if not dlg.exec() or not dlg.textValue().strip():
+            return
+
+        name = dlg.textValue().strip()
+
+        # 감지 엔진 접근 (parent → VisitorTimelineItem → window() → MainWindow)
+        main_win = self.parent().window() if self.parent() else None
+        det = getattr(main_win, '_detection_thread', None) if main_win else None
+
+        if not det or not getattr(det, '_app', None):
+            QMessageBox.warning(self, "오류", "감지 엔진이 준비되지 않았습니다")
+            return
+
+        import cv2
+        img = cv2.imread(self._thumb_path)
+        if img is None:
+            QMessageBox.warning(self, "오류", "이미지를 읽을 수 없습니다")
+            return
+
+        try:
+            faces = det._app.get(img)
+        except Exception as e:
+            logger.warning("얼굴 재감지 실패: %s", e)
+            faces = None
+
+        if not faces:
+            QMessageBox.warning(self, "오류", "이미지에서 얼굴을 찾을 수 없습니다")
+            return
+
+        import database
+        visitor_id = det.register_face(name, faces[0].embedding)
+        database.update_visitor_thumbnail(visitor_id, self._thumb_path)
+
+        self._registered_name = name
+        self.accept()
 
 
 class VisitorTimelineItem(QWidget):
@@ -64,6 +146,7 @@ class VisitorTimelineItem(QWidget):
         self._name = name
         self._time_str = time_str
         self._thumbnail_path = thumbnail_path
+        self._is_registered = is_registered
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
@@ -77,21 +160,43 @@ class VisitorTimelineItem(QWidget):
         layout.addWidget(time_label)
 
         # 아바타 (원형, 이름 이니셜)
-        avatar = AvatarLabel(36, thumbnail, Q_GREEN if is_registered else Q_AMBER, initial=name[:1] if name else "?")
-        layout.addWidget(avatar)
+        self._avatar = AvatarLabel(36, thumbnail, Q_GREEN if is_registered else Q_AMBER, initial=name[:1] if name else "?")
+        layout.addWidget(self._avatar)
 
         # 이름
-        name_label = QLabel(name)
-        name_label.setStyleSheet(
+        self._name_label = QLabel(name)
+        self._name_label.setStyleSheet(
             f"color: {'#f1f5f9' if is_registered else '#fbbf24'}; font-size: 13px; font-weight: bold;"
         )
-        layout.addWidget(name_label, 1)
+        layout.addWidget(self._name_label, 1)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and self._thumbnail_path:
-            popup = ThumbnailPopup(self._name, self._time_str, self._thumbnail_path, self)
+            popup = ThumbnailPopup(
+                self._name, self._time_str, self._thumbnail_path,
+                is_registered=self._is_registered, parent=self,
+            )
             popup.exec()
+
+            # 등록이 완료됐으면 타임라인 아이템 UI 업데이트
+            if popup._registered_name:
+                self._mark_as_registered(popup._registered_name)
+                from .toast_widget import ToastWidget
+                ToastWidget.show_toast(self.window(), f"'{popup._registered_name}' 등록 완료", True)
+
         super().mousePressEvent(event)
+
+    def _mark_as_registered(self, name: str):
+        """등록 완료 후 아이템 외관을 등록자 스타일로 변경"""
+        self._name = name
+        self._is_registered = True
+        self._name_label.setText(name)
+        self._name_label.setStyleSheet(
+            "color: #f1f5f9; font-size: 13px; font-weight: bold;"
+        )
+        self._avatar._border_color = Q_GREEN
+        self._avatar._initial = name[:1] if name else "?"
+        self._avatar.update()
 
 
 class AvatarLabel(QWidget):

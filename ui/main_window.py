@@ -717,7 +717,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"파일을 찾을 수 없습니다: {path}")
 
     def _restart_app(self):
-        """앱 내부 새로고침 — 엔진 재시작 + 데이터 리로드 (창 유지)"""
+        """앱 내부 새로고침 — 코드 핫리로드 + 엔진 재시작 + 데이터 리로드 (창 유지)"""
         try:
             self.status_bar.showMessage("새로고침 중...")
             QApplication.processEvents()
@@ -737,17 +737,20 @@ class MainWindow(QMainWindow):
             self._recording_thread = None
             QApplication.processEvents()
 
-            # 2. config 재로드
+            # 2. UI 모듈 핫 리로드 (코드 변경 즉시 반영)
+            self._hot_reload_ui_modules()
+
+            # 3. config 재로드
             import yaml
             config_path = os.path.join(PROJECT_DIR, "config.yaml")
             if os.path.exists(config_path):
                 with open(config_path, "r", encoding="utf-8") as f:
                     self.config = yaml.safe_load(f) or {}
 
-            # 3. 엔진 재시작
+            # 4. 엔진 재시작
             self._start_engines()
 
-            # 4. 모든 UI 데이터 갱신
+            # 5. 모든 UI 데이터 갱신
             self._update_kpi()
             self._refresh_rec_list()
             if hasattr(self, '_visitor_view'):
@@ -755,11 +758,58 @@ class MainWindow(QMainWindow):
             if hasattr(self, '_stats_view'):
                 self._stats_view._refresh()
 
-            self.status_bar.showMessage("새로고침 완료", 3000)
+            self.status_bar.showMessage("새로고침 완료 (코드 리로드 포함)", 3000)
             ToastWidget.show_toast(self, "새로고침 완료", True)
         except Exception as e:
             self.status_bar.showMessage(f"새로고침 오류: {e}")
             logger.exception("새로고침 오류")
+
+    def _hot_reload_ui_modules(self):
+        """변경된 UI 모듈을 다시 로드하고 위젯을 재생성"""
+        import importlib
+        import sys
+
+        # 리로드 대상 모듈 (의존 순서: 하위 → 상위)
+        reload_targets = [
+            "ui.design_tokens",
+            "ui.visitor_timeline",
+            "ui.visitor_manager",
+        ]
+        for mod_name in reload_targets:
+            if mod_name in sys.modules:
+                try:
+                    importlib.reload(sys.modules[mod_name])
+                    logger.info("모듈 리로드: %s", mod_name)
+                except Exception as e:
+                    logger.warning("모듈 리로드 실패: %s — %s", mod_name, e)
+
+        # 타임라인 위젯 재생성
+        self._rebuild_timeline()
+
+    def _rebuild_timeline(self):
+        """타임라인 위젯을 리로드된 모듈의 새 클래스로 교체"""
+        from ui.visitor_timeline import VisitorTimeline as ReloadedTimeline
+
+        old = self.timeline
+        parent_layout = old.parent().layout() if old.parent() else None
+        if not parent_layout:
+            return
+
+        # 레이아웃에서 위치(index) 파악
+        idx = parent_layout.indexOf(old)
+        if idx < 0:
+            return
+
+        # 기존 위젯 제거
+        parent_layout.removeWidget(old)
+        old.deleteLater()
+
+        # 새 위젯 생성 & 같은 위치에 삽입
+        self.timeline = ReloadedTimeline()
+        parent_layout.insertWidget(idx, self.timeline, 1)
+
+        # 오늘 방문 데이터 다시 로드
+        self._load_today_timeline()
 
     def _open_settings(self):
         """설정 다이얼로그 열기"""

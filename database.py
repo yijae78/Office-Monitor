@@ -164,7 +164,7 @@ def hard_delete_visitor(visitor_id: int):
 
 def add_embedding(visitor_id: int, embedding_bytes: bytes, quality: float = 0.0) -> int:
     return execute("INSERT INTO face_embeddings (visitor_id, embedding, quality) VALUES (?,?,?)",
-                   (visitor_id, embedding_bytes, quality))
+                   (visitor_id, embedding_bytes, float(quality)))
 
 
 def get_lowest_quality_embedding(visitor_id: int):
