@@ -28,7 +28,7 @@ class DetectionThread(QThread):
     visit_logged = pyqtSignal(str, bool, str)  # name, is_registered, thumbnail_path
     face_captured = pyqtSignal(int)  # pending_face_id
 
-    MAX_EMBEDDINGS_PER_VISITOR = 10
+    MAX_EMBEDDINGS_PER_VISITOR = 20
     MIN_FACE_SIZE = 60          # 최소 얼굴 크기 (px)
     MIN_BLUR_SCORE = 25.0       # 최소 선명도 (라플라시안 분산)
     MIN_CAPTURE_DET_SCORE = 0.40  # 수집 최소 감지 점수
