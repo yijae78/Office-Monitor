@@ -456,7 +456,15 @@ class VisitorTimeline(QWidget):
     def add_visitor(self, time_str: str, name: str, thumbnail: QPixmap = None,
                     is_registered: bool = True, thumbnail_path: str = None):
         """방문자 추가 (최신이 위에)"""
-        self._empty_label.hide()
+        try:
+            self._empty_label.hide()
+        except RuntimeError:
+            # deleteLater()로 삭제 예약된 상태 — 새로 생성
+            self._empty_label = QLabel("아직 방문자가 없습니다")
+            self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._empty_label.setStyleSheet("color: rgba(255,255,255,0.35); padding: 32px; font-size: 13px;")
+            self._container_layout.addWidget(self._empty_label)
+            self._empty_label.hide()
         item = VisitorTimelineItem(time_str, name, thumbnail, is_registered, thumbnail_path)
         self._container_layout.insertWidget(
             self._container_layout.count() - 1, item
@@ -467,8 +475,12 @@ class VisitorTimeline(QWidget):
         """타임라인 초기화"""
         while self._container_layout.count() > 1:  # stretch 유지
             item = self._container_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            w = item.widget()
+            if w and w is not self._empty_label:
+                w.deleteLater()
+        # _empty_label이 레이아웃에서 빠졌으면 다시 추가
+        if self._empty_label.parent() is None or self._container_layout.indexOf(self._empty_label) < 0:
+            self._container_layout.insertWidget(0, self._empty_label)
         self._empty_label.show()
         self._update_title()
 

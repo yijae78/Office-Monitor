@@ -523,19 +523,23 @@ class MainWindow(QMainWindow):
         self.kpi_faces.set_value(str(len(faces)))
 
     def _on_visit_logged(self, name: str, is_registered: bool, thumb_path: str):
-        now = datetime.now().strftime("%H:%M")
-        thumb_pix = None
-        if thumb_path and os.path.exists(thumb_path):
-            thumb_pix = QPixmap(thumb_path)
-        self.timeline.add_visitor(
-            now, name, thumbnail=thumb_pix,
-            is_registered=is_registered, thumbnail_path=thumb_path,
-        )
-        self._update_kpi()
+        try:
+            now = datetime.now().strftime("%H:%M")
+            thumb_pix = None
+            if thumb_path and os.path.exists(thumb_path):
+                thumb_pix = QPixmap(thumb_path)
+            self.timeline.add_visitor(
+                now, name, thumbnail=thumb_pix,
+                is_registered=is_registered, thumbnail_path=thumb_path,
+            )
+            self._update_kpi()
 
-        # 토스트 알림
-        msg = f"{'등록됨' if is_registered else '미등록'}: {name}"
-        ToastWidget.show_toast(self, msg, is_registered)
+            # 토스트 알림
+            msg = f"{'등록됨' if is_registered else '미등록'}: {name}"
+            ToastWidget.show_toast(self, msg, is_registered)
+        except RuntimeError:
+            # 초기화 직후 deleteLater()로 예약된 위젯에 접근 시 무시
+            pass
 
         # 미등록 방문자 경고음
         if not is_registered:

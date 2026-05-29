@@ -74,6 +74,10 @@ class DetectionThread(QThread):
         self._track_visitors = {}    # {track_id: visitor_id or None}
         self._track_registered = {}  # {track_id: bool}
         self._track_last_seen = {}   # {track_id: timestamp}
+        self._track_embeddings = {}  # {track_id: embedding} — 최근 임베딩 저장
+
+        # 최근 방문 로그 임베딩 (같은 사람 중복 로그 방지)
+        self._recent_log_embeddings = []  # [(embedding, name, timestamp)]
 
         self._reset_requested = False  # 스레드 안전 리셋 플래그
 
@@ -165,6 +169,8 @@ class DetectionThread(QThread):
         self._track_visitors.clear()
         self._track_registered.clear()
         self._track_last_seen.clear()
+        self._track_embeddings.clear()
+        self._recent_log_embeddings.clear()
         self._new_face_cooldown.clear()
         self._capture_candidates.clear()
         # YOLO ByteTrack 리셋: predictor 초기화 → 다음 track()에서 재생성
@@ -282,6 +288,7 @@ class DetectionThread(QThread):
                         self._track_names[track_id] = name
                         self._track_visitors[track_id] = visitor_id
                         self._track_registered[track_id] = True
+                        self._track_embeddings[track_id] = embedding.copy()
 
                         if self._auto_augment:
                             q = self._compute_quality_score(
@@ -289,10 +296,29 @@ class DetectionThread(QThread):
                                 float(face.det_score), face)
                             self._try_augment_embedding(visitor_id, embedding, q)
                     else:
-                        if track_id not in self._track_names:
-                            self._track_names[track_id] = "미등록"
-                            self._track_visitors[track_id] = None
-                            self._track_registered[track_id] = False
+                        # 이미 등록자로 캐시된 track → 유지 (각도 변화 무시)
+                        if is_registered:
+                            pass
+                        elif track_id not in self._track_names:
+                            # 새 track — 최근 등록 track의 임베딩과 비교
+                            inherited = False
+                            for prev_tid, prev_emb in self._track_embeddings.items():
+                                if self._track_registered.get(prev_tid, False):
+                                    if self._cosine_sim(embedding, prev_emb) >= self._similarity_threshold:
+                                        name = self._track_names[prev_tid]
+                                        visitor_id = self._track_visitors[prev_tid]
+                                        is_registered = True
+                                        self._track_names[track_id] = name
+                                        self._track_visitors[track_id] = visitor_id
+                                        self._track_registered[track_id] = True
+                                        self._track_embeddings[track_id] = embedding.copy()
+                                        inherited = True
+                                        break
+                            if not inherited:
+                                self._track_names[track_id] = "미등록"
+                                self._track_visitors[track_id] = None
+                                self._track_registered[track_id] = False
+                                self._track_embeddings[track_id] = embedding.copy()
 
                         # 미등록 얼굴 → 조용히 최고 프레임 수집
                         if not is_registered:
@@ -328,10 +354,20 @@ class DetectionThread(QThread):
                 "type": "person",
             })
 
-            # 방문 로그 (등록자: visitor_id 기준, 미등록자: track_id 기준 쿨다운)
+            # 방문 로그 (등록자: visitor_id 기준, 미등록자: 임베딩 유사도 기반 쿨다운)
             cooldown_key = visitor_id if visitor_id else f"track_{track_id}"
             last_seen = self._cooldown_map.get(cooldown_key, 0)
-            if now - last_seen > self._cooldown:
+            should_log = now - last_seen > self._cooldown
+
+            # 미등록자: track_id가 바뀌어도 같은 얼굴이면 중복 로그 방지
+            if should_log and not is_registered and embedding is not None:
+                for prev_emb, prev_name, prev_time in self._recent_log_embeddings:
+                    if now - prev_time < self._cooldown:
+                        if self._cosine_sim(embedding, prev_emb) >= self._similarity_threshold:
+                            should_log = False
+                            break
+
+            if should_log:
                 self._cooldown_map[cooldown_key] = now
                 thumb_path = self._save_thumbnail(frame, face_abs_bbox)
                 database.add_visit_log(
@@ -342,6 +378,14 @@ class DetectionThread(QThread):
                     is_registered=is_registered,
                 )
                 self.visit_logged.emit(name, is_registered, thumb_path)
+                # 최근 로그 임베딩 기록
+                if embedding is not None:
+                    self._recent_log_embeddings.append((embedding.copy(), name, now))
+                    # 오래된 항목 정리
+                    self._recent_log_embeddings = [
+                        (e, n, t) for e, n, t in self._recent_log_embeddings
+                        if now - t < self._cooldown
+                    ]
 
         # 사라진 track_id 정리
         for tid in active_track_ids:
@@ -356,6 +400,7 @@ class DetectionThread(QThread):
             self._track_visitors.pop(tid, None)
             self._track_registered.pop(tid, None)
             self._track_last_seen.pop(tid, None)
+            self._track_embeddings.pop(tid, None)
 
         self.faces_detected.emit(results)
 

@@ -60,6 +60,27 @@ def main():
     setup_logging()
     sys.excepthook = _global_exception_handler
 
+    # ── 중복 실행 방지 (Named Mutex) ──
+    _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "OfficeMonitor_SingleInstance")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        # 이미 실행 중인 인스턴스가 있으면 그 창을 앞으로 가져오고 종료
+        import win32gui, win32con  # noqa: E401
+        def _bring_existing():
+            def callback(hwnd, _):
+                if win32gui.IsWindowVisible(hwnd):
+                    title = win32gui.GetWindowText(hwnd)
+                    if "Office Monitor" in title or "OfficeMonitor" in title:
+                        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                        win32gui.SetForegroundWindow(hwnd)
+                        return False
+                return True
+            try:
+                win32gui.EnumWindows(callback, None)
+            except Exception:
+                pass
+        _bring_existing()
+        sys.exit(0)
+
     # Windows 작업표시줄 아이콘 표시를 위한 AppUserModelID
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("OfficeMonitor.App")
 
