@@ -80,27 +80,19 @@ C:\OfficeMonitor/                # 런타임 데이터 (git 추적 안 됨)
 └── crash.log                   # 크래시 로그
 ```
 
-## 설치 및 실행
-
-### 요구 사항
-
-- Python 3.10 이상
-- Windows (DirectShow 카메라 백엔드 사용)
-- 웹캠
-
-### 설치
+## 빠른 시작
 
 ```bash
-pip install PyQt6 opencv-python insightface ultralytics numpy pyyaml onnxruntime
-```
-
-### 실행
-
-```bash
+git clone https://github.com/yijae78/Office-Monitor.git
+cd Office-Monitor
+python -m venv .venv && .venv\Scripts\activate
+pip install -r requirements.txt
 python main.py
 ```
 
 최초 실행 시 InsightFace 모델(`buffalo_l`)이 자동 다운로드됩니다.
+
+> 상세 설치 가이드, 사용법, 문제 해결은 **[사용 매뉴얼 (MANUAL.md)](MANUAL.md)**을 참고하세요.
 
 ## 설정 (config.yaml)
 
