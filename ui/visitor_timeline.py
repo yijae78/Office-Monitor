@@ -442,8 +442,16 @@ class VisitorTimeline(QWidget):
         import database
         database.clear_today_visits()
         self.clear()
+        # 감지 엔진 추적 캐시도 리셋 (안 하면 쿨다운 때문에 재인식 안 됨)
+        main_win = self.window()
+        if hasattr(main_win, '_detection_thread') and main_win._detection_thread:
+            main_win._detection_thread.reset_tracking()
+        if hasattr(main_win, 'camera_widget'):
+            main_win.camera_widget._detections = []
+        if hasattr(main_win, '_update_kpi'):
+            main_win._update_kpi()
         from .toast_widget import ToastWidget
-        ToastWidget.show_toast(self.window(), "오늘 방문 기록 초기화됨", True)
+        ToastWidget.show_toast(main_win, "오늘 방문 기록 초기화됨", True)
 
     def add_visitor(self, time_str: str, name: str, thumbnail: QPixmap = None,
                     is_registered: bool = True, thumbnail_path: str = None):

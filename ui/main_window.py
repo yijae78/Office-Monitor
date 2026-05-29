@@ -911,10 +911,7 @@ class MainWindow(QMainWindow):
         database.clear_today_visits()
         self.timeline.clear()
         if self._detection_thread:
-            self._detection_thread._cooldown_map.clear()
-            self._detection_thread._track_names.clear()
-            self._detection_thread._track_visitors.clear()
-            self._detection_thread._track_registered.clear()
+            self._detection_thread.reset_tracking()
         self.camera_widget._detections = []
         self._update_kpi()
         ToastWidget.show_toast(self, "오늘 기록 리셋 완료", True)

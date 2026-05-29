@@ -149,6 +149,22 @@ class DetectionThread(QThread):
             self._known_norms = None
             self._known_meta = []
 
+    def reset_tracking(self):
+        """오늘 초기화 시 호출 — 추적 캐시 + 쿨다운 리셋 (스레드 안전)"""
+        self._cooldown_map.clear()
+        self._track_names.clear()
+        self._track_visitors.clear()
+        self._track_registered.clear()
+        self._track_last_seen.clear()
+        self._new_face_cooldown.clear()
+        self._capture_candidates.clear()
+        # YOLO ByteTrack 리셋: tracker 내부 상태 초기화
+        if self._yolo is not None:
+            try:
+                self._yolo.predictor = None
+            except Exception:
+                pass
+
     def reload_known_faces(self):
         self._load_known_faces()
         self._load_pending_embeddings()
