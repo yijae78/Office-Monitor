@@ -29,9 +29,13 @@ def execute(sql: str, params: tuple = (), fetch: str = "none"):
         try:
             cur = conn.execute(sql, params)
             if fetch == "one":
-                return cur.fetchone()
+                result = cur.fetchone()
+                conn.commit()
+                return result
             elif fetch == "all":
-                return cur.fetchall()
+                result = cur.fetchall()
+                conn.commit()
+                return result
             conn.commit()
             return cur.lastrowid
         finally:
@@ -107,6 +111,7 @@ def init_db():
         except Exception as e:
             if "duplicate column" not in str(e).lower():
                 logger.warning("마이그레이션 실패: %s — %s", stmt, e)
+    conn.commit()
     conn.close()
 
 
@@ -187,6 +192,7 @@ def get_all_embeddings():
     return execute("""
         SELECT e.id, e.visitor_id, e.embedding, v.name
         FROM face_embeddings e JOIN visitors v ON e.visitor_id = v.id
+        WHERE COALESCE(v.status, 'active') = 'active'
     """, fetch="all")
 
 
@@ -304,12 +310,19 @@ def finish_recording(rec_id: int, size_bytes: int):
 
 # ── 정리 ──
 
+_ALLOWED_TABLES = {"visit_logs", "snapshots", "recordings", "pending_faces"}
+
+
 def get_old_records(table: str, days: int):
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f"허용되지 않는 테이블: {table}")
     return execute(
         f"SELECT * FROM {table} WHERE timestamp < datetime('now','localtime',?)",
         (f"-{days} days",), fetch="all")
 
 
 def delete_old_records(table: str, days: int):
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f"허용되지 않는 테이블: {table}")
     execute(f"DELETE FROM {table} WHERE timestamp < datetime('now','localtime',?)",
             (f"-{days} days",))

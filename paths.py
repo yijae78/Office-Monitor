@@ -33,6 +33,8 @@ def setup_logging():
     os.makedirs(DATA_DIR, exist_ok=True)
 
     root = logging.getLogger()
+    if root.handlers:
+        return  # 핫리로드 시 핸들러 중복 방지
     root.setLevel(logging.INFO)
 
     fmt = logging.Formatter(

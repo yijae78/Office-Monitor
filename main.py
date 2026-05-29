@@ -75,7 +75,7 @@ def main():
         png_path = os.path.join(PROJECT_DIR, "assets", f"icon-{size}.png")
         if os.path.exists(png_path):
             icon.addFile(png_path)
-    ico_path = os.path.join(PROJECT_DIR, "icon.ico")
+    ico_path = os.path.join(PROJECT_DIR, "assets", "icon.ico")
     if os.path.exists(ico_path):
         icon.addFile(ico_path)
 

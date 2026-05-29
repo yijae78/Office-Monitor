@@ -1099,7 +1099,7 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════
 
     def _setup_tray(self):
-        icon_path = os.path.join(PROJECT_DIR, "icon.ico")
+        icon_path = os.path.join(PROJECT_DIR, "assets", "icon.ico")
         if not os.path.exists(icon_path):
             return
         self._tray = QSystemTrayIcon(QIcon(icon_path), self)

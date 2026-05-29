@@ -47,12 +47,20 @@ class CameraThread(QThread):
                 ret, frame = self._cap.read()
                 if not ret:
                     self.camera_status.emit("카메라 프레임 읽기 실패", False)
-                    time.sleep(0.5)
-                    # 재연결 시도
                     self._cap.release()
-                    self._cap = self._try_open_camera()
+                    # 지수 백오프 재연결 (1→2→4→8→16→30초)
+                    retry_delay = 1
+                    while self._running:
+                        self.camera_status.emit(
+                            f"카메라 재연결 시도 ({retry_delay}초 후...)", False)
+                        time.sleep(retry_delay)
+                        if not self._running:
+                            break
+                        self._cap = self._try_open_camera()
+                        if self._cap is not None:
+                            break
+                        retry_delay = min(retry_delay * 2, 30)
                     if self._cap is None:
-                        self.camera_status.emit("카메라 재연결 실패", False)
                         break
                     continue
 

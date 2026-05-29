@@ -184,9 +184,25 @@ def clear_demo_data():
                 if f.startswith("demo_"):
                     os.remove(os.path.join(d, f))
 
-    # DB 초기화 (전체)
-    database.execute("DELETE FROM visit_logs")
-    database.execute("DELETE FROM face_embeddings")
-    database.execute("DELETE FROM visitors")
-    database.execute("DELETE FROM pending_faces")
-    database.execute("DELETE FROM recordings")
+    # 데모 데이터만 삭제 (실 데이터 보호)
+    demo_names = tuple(DEMO_NAMES)
+    placeholders = ",".join("?" * len(demo_names))
+
+    # 데모 방문자 ID 조회
+    demo_visitors = database.execute(
+        f"SELECT id FROM visitors WHERE name IN ({placeholders})",
+        demo_names, fetch="all")
+    demo_vids = [r["id"] for r in (demo_visitors or [])]
+
+    if demo_vids:
+        vid_ph = ",".join("?" * len(demo_vids))
+        database.execute(f"DELETE FROM visit_logs WHERE visitor_id IN ({vid_ph})", tuple(demo_vids))
+        database.execute(f"DELETE FROM face_embeddings WHERE visitor_id IN ({vid_ph})", tuple(demo_vids))
+        database.execute(f"DELETE FROM visitors WHERE id IN ({vid_ph})", tuple(demo_vids))
+
+    # 미등록 방문 로그 (데모 썸네일 경로 패턴)
+    database.execute("DELETE FROM visit_logs WHERE thumbnail_path LIKE '%demo_%'")
+
+    # 데모 pending_faces / 녹화 (demo_ 접두사 경로)
+    database.execute("DELETE FROM pending_faces WHERE image_path LIKE '%demo_%'")
+    database.execute("DELETE FROM recordings WHERE file_path LIKE '%demo_%'")

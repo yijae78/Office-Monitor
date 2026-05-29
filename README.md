@@ -44,8 +44,9 @@ OfficeMonitor/
 ├── detection_engine.py     # 얼굴 인식 + YOLO 추적 스레드
 ├── monitor_engine.py       # 카메라 캡처 스레드
 ├── recording_engine.py     # 영상 녹화 스레드
-├── icon.ico                # 앱 아이콘
-├── assets/                 # 아이콘 PNG (16~512px)
+├── assets/                 # 앱 아이콘 (ICO + PNG 16~512px)
+├── tools/
+│   └── generate_icon.py    # 앱 아이콘 생성 스크립트
 └── ui/
     ├── main_window.py      # 메인 윈도우 (전체 통합)
     ├── camera_widget.py    # 카메라 뷰어 (줌, 영역 캡처, 감지 오버레이)

@@ -337,14 +337,27 @@ class CameraWidget(QWidget):
                     painter.setPen(color)
                     painter.drawText(bx + 4, by - 6, name)
                 else:
-                    # 미등록자: 붉은색 박스
+                    # 미등록자: 붉은색 박스 + 라벨
                     color = QColor(239, 68, 68)
                     if is_body:
                         pen = QPen(color, 1, Qt.PenStyle.DashLine)
+                        label = "미인식"
                     else:
                         pen = QPen(color, 2)
+                        label = "미등록"
                     painter.setPen(pen)
                     painter.drawRect(bx, by, bw, bh)
+
+                    font = QFont("Pretendard Variable", 12)
+                    font.setWeight(QFont.Weight.Bold)
+                    painter.setFont(font)
+                    fm = painter.fontMetrics()
+                    tw = fm.horizontalAdvance(label) + 8
+                    th = fm.height() + 4
+                    label_y = by - th - 2
+                    painter.fillRect(bx, label_y, tw, th, QColor(0, 0, 0, 180))
+                    painter.setPen(color)
+                    painter.drawText(bx + 4, by - 6, label)
 
     def _paint_placeholder(self, painter: QPainter):
         """카메라 미연결 시 플레이스홀더"""
