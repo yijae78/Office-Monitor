@@ -49,6 +49,8 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+> **설치 실패 시:** `insightface`나 `onnxruntime` 패키지에서 에러가 발생하면 [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)를 먼저 설치한 후 다시 시도하세요. 설치 시 "C++를 사용한 데스크톱 개발" 워크로드를 선택합니다.
+
 **4단계: 실행**
 
 ```bash
@@ -491,6 +493,15 @@ C:\OfficeMonitor\              ← 기본 데이터 저장 경로
 2. 카메라 해상도를 낮추기 (640x480)
 3. 다른 무거운 프로그램 종료하기
 4. 백그라운드 녹화를 중지하기
+
+### pip install 실패 (insightface / onnxruntime)
+
+**증상:** `pip install -r requirements.txt`에서 빌드 에러 발생
+
+**해결:**
+1. [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) 설치
+2. 설치 시 **"C++를 사용한 데스크톱 개발"** 워크로드 선택
+3. 설치 완료 후 터미널을 재시작하고 `pip install -r requirements.txt` 재시도
 
 ### 모델 다운로드 실패
 
