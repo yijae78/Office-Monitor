@@ -75,6 +75,8 @@ class DetectionThread(QThread):
         self._track_registered = {}  # {track_id: bool}
         self._track_last_seen = {}   # {track_id: timestamp}
 
+        self._reset_requested = False  # 스레드 안전 리셋 플래그
+
         # 임베딩 행렬 캐시 (고속 매칭용)
         self._known_matrix = None    # (N, 512) ndarray
         self._known_norms = None     # (N,) ndarray
@@ -107,6 +109,9 @@ class DetectionThread(QThread):
         self._load_pending_embeddings()
 
         while self._running:
+            if self._reset_requested:
+                self._do_reset()
+
             try:
                 with self._frame_lock:
                     frame = self._frame
@@ -150,7 +155,11 @@ class DetectionThread(QThread):
             self._known_meta = []
 
     def reset_tracking(self):
-        """오늘 초기화 시 호출 — 추적 캐시 + 쿨다운 리셋 (스레드 안전)"""
+        """오늘 초기화 시 호출 — 플래그만 세우고, 감지 스레드가 안전하게 리셋"""
+        self._reset_requested = True
+
+    def _do_reset(self):
+        """감지 스레드 내부에서 실행 — 스레드 안전한 리셋"""
         self._cooldown_map.clear()
         self._track_names.clear()
         self._track_visitors.clear()
@@ -158,12 +167,14 @@ class DetectionThread(QThread):
         self._track_last_seen.clear()
         self._new_face_cooldown.clear()
         self._capture_candidates.clear()
-        # YOLO ByteTrack 리셋: tracker 내부 상태 초기화
+        # YOLO ByteTrack 리셋: predictor 초기화 → 다음 track()에서 재생성
         if self._yolo is not None:
             try:
                 self._yolo.predictor = None
             except Exception:
                 pass
+        self._reset_requested = False
+        logger.info("추적 캐시 리셋 완료")
 
     def reload_known_faces(self):
         self._load_known_faces()
