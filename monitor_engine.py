@@ -3,6 +3,7 @@
 import cv2
 import time
 import logging
+import threading
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -24,6 +25,9 @@ class CameraThread(QThread):
         self._running = False
         self._cap = None
         self._actual_fps = 0.0
+        self._latest_frame = None
+        self._latest_ts = 0.0
+        self._frame_lock = threading.Lock()
 
     def run(self):
         self._running = True
@@ -65,7 +69,9 @@ class CameraThread(QThread):
                     continue
 
                 timestamp = time.time()
-                self.frame_ready.emit(frame, timestamp)
+                with self._frame_lock:
+                    self._latest_frame = frame
+                    self._latest_ts = timestamp
 
                 # FPS 계산
                 frame_count += 1
@@ -134,6 +140,11 @@ class CameraThread(QThread):
             cap.release()
 
         return None
+
+    def get_frame(self):
+        """최신 프레임 반환 (메인 스레드 폴링용)"""
+        with self._frame_lock:
+            return self._latest_frame, self._latest_ts
 
     def stop(self):
         self._running = False

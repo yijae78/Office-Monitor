@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
         self._panel_expanded = True
         self._panel_width = 260
         self._top_panel_expanded = True
+        self._last_polled_ts = 0.0
 
         self.setWindowTitle("OfficeMonitor")
         self.setMinimumSize(400, 300)
@@ -58,6 +59,11 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
         self._setup_tray()
         self._start_engines()
+
+        # 프레임 폴링 타이머 (~30fps) — 시그널 큐 적체 방지
+        self._frame_poll_timer = QTimer(self)
+        self._frame_poll_timer.timeout.connect(self._poll_frame)
+        self._frame_poll_timer.start(33)
 
         # FPS 갱신 타이머
         self._fps_timer = QTimer(self)
@@ -452,7 +458,6 @@ class MainWindow(QMainWindow):
             resolution=tuple(cam_cfg.get("resolution", [1280, 720])),
             fallback_ids=cam_cfg.get("fallback_ids", []),
         )
-        self._camera_thread.frame_ready.connect(self._on_frame)
         self._camera_thread.camera_status.connect(self._on_camera_status)
         self._camera_thread.camera_info.connect(self._on_camera_info)
         self._camera_thread.start()
@@ -477,6 +482,16 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════
     # 프레임 처리
     # ═══════════════════════════════════════
+
+    def _poll_frame(self):
+        """카메라 스레드에서 최신 프레임 폴링 (시그널 큐 적체 방지)"""
+        if not self._camera_thread:
+            return
+        frame, ts = self._camera_thread.get_frame()
+        if frame is None or ts == self._last_polled_ts:
+            return
+        self._last_polled_ts = ts
+        self._on_frame(frame, ts)
 
     def _on_frame(self, frame: np.ndarray, timestamp: float):
         self._last_frame = frame
@@ -835,7 +850,6 @@ class MainWindow(QMainWindow):
             camera_id=index,
             resolution=tuple(cam_cfg.get("resolution", [1280, 720])),
         )
-        self._camera_thread.frame_ready.connect(self._on_frame)
         self._camera_thread.camera_status.connect(self._on_camera_status)
         self._camera_thread.camera_info.connect(self._on_camera_info)
         self._camera_thread.start()
@@ -1154,7 +1168,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         # 타이머 정지 (메모리 누수 방지)
-        for timer_name in ('_fps_timer', '_kpi_timer', '_cleanup_timer', '_bad_face_timer'):
+        for timer_name in ('_frame_poll_timer', '_fps_timer', '_kpi_timer', '_cleanup_timer', '_bad_face_timer'):
             timer = getattr(self, timer_name, None)
             if timer:
                 timer.stop()
