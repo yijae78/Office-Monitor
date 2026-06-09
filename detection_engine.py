@@ -37,6 +37,7 @@ class DetectionThread(QThread):
     MIN_SAVE_SIZE = 200         # 최종 저장 이미지 최소 크기 (px)
     CAPTURE_DURATION = 3.0      # 최고 프레임 수집 시간 (초)
     MIN_QUALITY_SCORE = 25.0    # 최소 품질 점수 (완전 불량만 차단)
+    MIN_FRONTAL_DET_SCORE = 0.45  # 신원 매칭 최소 감지 점수 (측면/뒷모습 차단)
 
     def __init__(self, config: dict):
         super().__init__()
@@ -198,6 +199,25 @@ class DetectionThread(QThread):
         # 수집 시간이 지난 후보를 확정하여 저장
         self._finalize_candidates(now)
 
+    def _is_frontal_enough(self, face) -> bool:
+        """얼굴이 신원 매칭에 충분히 정면인지 확인 (측면/뒷모습 오인식 방지)
+
+        기준:
+        - det_score >= 0.45 (InsightFace 감지 신뢰도)
+        - 양쪽 눈 사이 거리 >= 15px (극단 측면 차단)
+        - 코 위치가 양 눈 중심에서 크게 벗어나지 않음 (측면 차단)
+        """
+        if face.det_score < self.MIN_FRONTAL_DET_SCORE:
+            return False
+        if not hasattr(face, 'kps') or face.kps is None or len(face.kps) < 3:
+            return False
+        left_eye, right_eye, nose = face.kps[0], face.kps[1], face.kps[2]
+        eye_dist = abs(left_eye[0] - right_eye[0])
+        if eye_dist < 15:
+            return False
+        nose_offset_x = abs(nose[0] - (left_eye[0] + right_eye[0]) / 2) / eye_dist
+        return nose_offset_x < 0.45
+
     def _detect_with_tracking(self, frame: np.ndarray, now: float):
         """YOLO + ByteTrack + InsightFace 통합 파이프라인
 
@@ -280,8 +300,9 @@ class DetectionThread(QThread):
                     embedding = face.embedding
                     matched_name, matched_vid, matched_sim, matched_reg = self._match_face(embedding)
                     best_sim = matched_sim
+                    frontal = self._is_frontal_enough(face)
 
-                    if matched_reg:
+                    if matched_reg and frontal:
                         name = matched_name
                         visitor_id = matched_vid
                         is_registered = True
@@ -300,20 +321,21 @@ class DetectionThread(QThread):
                         if is_registered:
                             pass
                         elif track_id not in self._track_names:
-                            # 새 track — 최근 등록 track의 임베딩과 비교
+                            # 새 track — 정면 얼굴일 때만 기존 track에서 승계
                             inherited = False
-                            for prev_tid, prev_emb in self._track_embeddings.items():
-                                if self._track_registered.get(prev_tid, False):
-                                    if self._cosine_sim(embedding, prev_emb) >= self._similarity_threshold:
-                                        name = self._track_names[prev_tid]
-                                        visitor_id = self._track_visitors[prev_tid]
-                                        is_registered = True
-                                        self._track_names[track_id] = name
-                                        self._track_visitors[track_id] = visitor_id
-                                        self._track_registered[track_id] = True
-                                        self._track_embeddings[track_id] = embedding.copy()
-                                        inherited = True
-                                        break
+                            if frontal:
+                                for prev_tid, prev_emb in self._track_embeddings.items():
+                                    if self._track_registered.get(prev_tid, False):
+                                        if self._cosine_sim(embedding, prev_emb) >= self._similarity_threshold:
+                                            name = self._track_names[prev_tid]
+                                            visitor_id = self._track_visitors[prev_tid]
+                                            is_registered = True
+                                            self._track_names[track_id] = name
+                                            self._track_visitors[track_id] = visitor_id
+                                            self._track_registered[track_id] = True
+                                            self._track_embeddings[track_id] = embedding.copy()
+                                            inherited = True
+                                            break
                             if not inherited:
                                 self._track_names[track_id] = "미등록"
                                 self._track_visitors[track_id] = None

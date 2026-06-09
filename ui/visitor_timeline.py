@@ -308,6 +308,8 @@ class AvatarLabel(QWidget):
 class VisitorTimeline(QWidget):
     """오늘 방문자 타임라인 (스크롤 가능, 글래스 카드)"""
 
+    MAX_DISPLAY = 35  # 최대 표시 인원 — 초과 시 자동 리셋
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -431,13 +433,17 @@ class VisitorTimeline(QWidget):
             self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self._update_title()
 
-    def _update_title(self):
-        # 방문자 수 카운트 (stretch, empty_label 제외)
+    def _visitor_count(self) -> int:
+        """현재 타임라인 항목 수 (stretch, empty_label 제외)"""
         count = 0
         for i in range(self._container_layout.count()):
             item = self._container_layout.itemAt(i)
             if item and item.widget() and isinstance(item.widget(), VisitorTimelineItem):
                 count += 1
+        return count
+
+    def _update_title(self):
+        count = self._visitor_count()
         arrow = "▶" if self._collapsed else "▼"
         suffix = f" ({count})" if count > 0 else ""
         self._toggle_btn.setText(f"  {arrow}  오늘 방문자{suffix}")
@@ -477,6 +483,10 @@ class VisitorTimeline(QWidget):
             self._empty_label.setStyleSheet("color: rgba(255,255,255,0.35); padding: 32px; font-size: 13px;")
             self._container_layout.addWidget(self._empty_label)
             self._empty_label.hide()
+        # 최대 인원 도달 시 자동 리셋
+        if self._visitor_count() >= self.MAX_DISPLAY:
+            self.clear()
+
         item = VisitorTimelineItem(time_str, name, thumbnail, is_registered, thumbnail_path)
         self._container_layout.insertWidget(
             self._container_layout.count() - 1, item
