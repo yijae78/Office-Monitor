@@ -283,45 +283,10 @@ class MainWindow(QMainWindow):
         return card, content_layout
 
     def _create_right_panel(self) -> QWidget:
-        from PyQt6.QtWidgets import QScrollArea
-
         panel = QWidget()
         panel.setMinimumWidth(0)
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(0, 0, 0, 0)
-        panel_layout.setSpacing(0)
-
-        # 스크롤 영역으로 감싸기
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet("""
-            QScrollArea { border: none; background: transparent; }
-            QScrollArea > QWidget > QWidget { background: transparent; }
-            QScrollBar:vertical {
-                width: 10px; background: rgba(255,255,255,0.06);
-                border-radius: 5px; margin: 2px;
-            }
-            QScrollBar::handle:vertical {
-                background: rgba(255,255,255,0.25);
-                border-radius: 4px; min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: rgba(0,168,255,0.45);
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0; background: transparent;
-            }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: transparent;
-            }
-        """)
-        scroll.viewport().setStyleSheet("background: transparent;")
-
-        scroll_content = QWidget()
-        scroll_content.setStyleSheet("background: transparent;")
-        layout = QVBoxLayout(scroll_content)
+        panel.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(panel)
         layout.setContentsMargins(6, 4, 4, 4)
         layout.setSpacing(6)
 
@@ -440,12 +405,6 @@ class MainWindow(QMainWindow):
         self.timeline = VisitorTimeline()
         layout.addWidget(self.timeline, 1)
 
-        # 타임라인 접힐 때 상단 정렬용 spacer
-        self._timeline_spacer = layout.addStretch()
-
-        scroll.setWidget(scroll_content)
-        panel_layout.addWidget(scroll)
-
         return panel
 
     def _create_visitor_view(self) -> QWidget:
@@ -518,7 +477,7 @@ class MainWindow(QMainWindow):
             self._recording_thread.set_frame(frame)
 
     def _on_faces_detected(self, faces: list):
-        self.camera_widget.update_frame(self._last_frame, faces)
+        self.camera_widget.update_detections(faces)
         self.lbl_face_count.setText(f"감지된 얼굴: {len(faces)}")
         self.kpi_faces.set_value(str(len(faces)))
 
@@ -593,6 +552,14 @@ class MainWindow(QMainWindow):
 
         # 얼굴 감지
         faces = det._app.get(frame)
+        # 근접 크롭 이미지에서 얼굴 못 찾으면 패딩 후 재시도
+        if not faces:
+            h, w = frame.shape[:2]
+            pad = max(h, w) // 2
+            padded = cv2.copyMakeBorder(
+                frame, pad, pad, pad, pad,
+                cv2.BORDER_CONSTANT, value=(0, 0, 0))
+            faces = det._app.get(padded)
         if not faces:
             ToastWidget.show_toast(self, "이미지에서 얼굴을 찾을 수 없습니다", False)
             return

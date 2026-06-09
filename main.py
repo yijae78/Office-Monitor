@@ -55,6 +55,31 @@ def _global_exception_handler(exc_type, exc_value, exc_tb):
     logging.getLogger(__name__).critical("치명적 오류:\n%s", msg)
 
 
+def _set_native_icon(window, ico_path):
+    """Win32 API로 네이티브 아이콘 설정 (작업표시줄 + ALT-TAB 확실 반영)"""
+    try:
+        hwnd = int(window.winId())
+        WM_SETICON = 0x0080
+        ICON_BIG = 1
+        ICON_SMALL = 0
+        IMAGE_ICON = 1
+        LR_LOADFROMFILE = 0x00000010
+
+        # 큰 아이콘 (48x48 — 작업표시줄, ALT-TAB)
+        hicon_big = ctypes.windll.user32.LoadImageW(
+            0, ico_path, IMAGE_ICON, 48, 48, LR_LOADFROMFILE)
+        # 작은 아이콘 (16x16 — 타이틀바)
+        hicon_small = ctypes.windll.user32.LoadImageW(
+            0, ico_path, IMAGE_ICON, 16, 16, LR_LOADFROMFILE)
+
+        if hicon_big:
+            ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_big)
+        if hicon_small:
+            ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_small)
+    except Exception:
+        pass
+
+
 def main():
     # 로깅 + 전역 예외 핸들러 설치
     setup_logging()
@@ -90,21 +115,22 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("OfficeMonitor")
 
-    # 앱 아이콘 (작업표시줄 + 타이틀바) — 다중 사이즈 PNG 로드
-    icon = QIcon()
-    for size in [16, 32, 48, 64, 128, 256, 512]:
+    # 앱 아이콘 (ICO 우선 — Windows 네이티브 지원)
+    ico_path = os.path.join(PROJECT_DIR, "assets", "icon.ico")
+    icon = QIcon(ico_path)
+    for size in [16, 32, 48, 64, 128, 256]:
         png_path = os.path.join(PROJECT_DIR, "assets", f"icon-{size}.png")
         if os.path.exists(png_path):
             icon.addFile(png_path)
-    ico_path = os.path.join(PROJECT_DIR, "assets", "icon.ico")
-    if os.path.exists(ico_path):
-        icon.addFile(ico_path)
 
     app.setWindowIcon(icon)
 
     window = MainWindow(config)
     window.setWindowIcon(icon)
     window.show()
+
+    # Win32 네이티브 아이콘 설정 (작업표시줄 + ALT-TAB 확실 반영)
+    _set_native_icon(window, ico_path)
 
     sys.exit(app.exec())
 

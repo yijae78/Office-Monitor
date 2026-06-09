@@ -146,6 +146,18 @@ class ThumbnailPopup(QDialog):
             logger.warning("얼굴 재감지 실패: %s", e)
             faces = None
 
+        # 근접 크롭 이미지에서 얼굴 못 찾으면 패딩 후 재시도
+        if not faces:
+            h, w = img.shape[:2]
+            pad = max(h, w) // 2
+            padded = cv2.copyMakeBorder(
+                img, pad, pad, pad, pad,
+                cv2.BORDER_CONSTANT, value=(0, 0, 0))
+            try:
+                faces = det._app.get(padded)
+            except Exception:
+                faces = None
+
         if not faces:
             QMessageBox.warning(self, "오류", "이미지에서 얼굴을 찾을 수 없습니다")
             return

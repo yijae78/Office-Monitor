@@ -25,6 +25,10 @@ class CameraWidget(QWidget):
         self._sel_end = QPoint()      # 드래그 끝점
         self._sel_dragging = False    # 드래그 진행 중
 
+        # 픽스맵 캐시 (프레임 변환 최적화)
+        self._pixmap_cache = None
+        self._pixmap_pos = (0, 0)
+
         self.setMinimumSize(160, 120)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
@@ -32,10 +36,16 @@ class CameraWidget(QWidget):
     def update_frame(self, frame: np.ndarray, detections: list = None):
         """새 프레임 + 감지 결과 업데이트. detections=None이면 이전 결과 유지."""
         self._frame = frame
+        self._pixmap_cache = None
         if detections is not None:
             self._detections = detections
         self._status_ok = True
         self._status_text = ""
+        self.update()
+
+    def update_detections(self, detections: list):
+        """감지 결과만 업데이트 (프레임 재변환 없이 오버레이만 갱신)."""
+        self._detections = detections
         self.update()
 
     def set_status(self, text: str, ok: bool = False):
@@ -46,6 +56,7 @@ class CameraWidget(QWidget):
 
     def set_zoom(self, factor: float):
         self._zoom = max(0.5, min(3.0, factor))
+        self._pixmap_cache = None
         self.update()
 
     def wheelEvent(self, event):
@@ -65,6 +76,10 @@ class CameraWidget(QWidget):
 
     def zoom_reset(self):
         self.set_zoom(1.0)
+
+    def resizeEvent(self, event):
+        self._pixmap_cache = None
+        super().resizeEvent(event)
 
     # ── 영역 캡처 ──
 
@@ -245,37 +260,38 @@ class CameraWidget(QWidget):
                              "캡처할 영역을 드래그하세요\nESC: 취소")
 
     def _paint_frame(self, painter: QPainter):
-        """프레임을 위젯 크기에 맞춰 그리기 (줌 시 중앙 크롭)"""
+        """프레임을 위젯 크기에 맞춰 그리기 (줌 시 중앙 크롭, 픽스맵 캐시)"""
         h, w, ch = self._frame.shape
 
-        # 줌 > 1이면 프레임의 중앙 부분만 크롭
-        if self._zoom > 1.0:
-            crop_w = int(w / self._zoom)
-            crop_h = int(h / self._zoom)
-            x1 = (w - crop_w) // 2
-            y1 = (h - crop_h) // 2
-            cropped = self._frame[y1:y1+crop_h, x1:x1+crop_w].copy()
-            frame_to_draw = cropped
-            fh, fw = crop_h, crop_w
-        else:
-            frame_to_draw = self._frame
-            fh, fw = h, w
+        # 픽스맵 캐시: 프레임·줌·크기 변경 시에만 재생성
+        if self._pixmap_cache is None:
+            if self._zoom > 1.0:
+                crop_w = int(w / self._zoom)
+                crop_h = int(h / self._zoom)
+                x1 = (w - crop_w) // 2
+                y1 = (h - crop_h) // 2
+                cropped = self._frame[y1:y1+crop_h, x1:x1+crop_w].copy()
+                frame_to_draw = cropped
+                fh, fw = crop_h, crop_w
+            else:
+                frame_to_draw = self._frame
+                fh, fw = h, w
 
-        bytes_per_line = ch * fw
-        img = QImage(frame_to_draw.data, fw, fh, bytes_per_line, QImage.Format.Format_BGR888)
-        pixmap = QPixmap.fromImage(img)
+            bytes_per_line = ch * fw
+            img = QImage(frame_to_draw.data, fw, fh, bytes_per_line, QImage.Format.Format_BGR888)
+            pixmap = QPixmap.fromImage(img)
 
-        # 위젯 크기에 맞추되 비율 유지
-        widget_rect = self.rect()
-        scaled = pixmap.scaled(
-            widget_rect.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
+            self._pixmap_cache = pixmap.scaled(
+                self.rect().size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            )
+            px = (self.width() - self._pixmap_cache.width()) // 2
+            py = (self.height() - self._pixmap_cache.height()) // 2
+            self._pixmap_pos = (px, py)
 
-        # 중앙 배치
-        x = (widget_rect.width() - scaled.width()) // 2
-        y = (widget_rect.height() - scaled.height()) // 2
+        scaled = self._pixmap_cache
+        x, y = self._pixmap_pos
         painter.drawPixmap(x, y, scaled)
 
         # 줌 표시 (1배 이외일 때)
