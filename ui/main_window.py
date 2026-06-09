@@ -254,14 +254,15 @@ class MainWindow(QMainWindow):
         page_layout.addWidget(content_area, 1)
         return page
 
-    def _create_collapsible_card(self, title_text: str) -> tuple:
+    def _create_collapsible_card(self, title_text: str, collapsed: bool = False) -> tuple:
         card = QFrame()
         card.setObjectName("glassCard")
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
 
-        header = QPushButton(f"  ▼  {title_text}")
+        arrow = "▶" if collapsed else "▼"
+        header = QPushButton(f"  {arrow}  {title_text}")
         header.setObjectName("cardHeader")
         header.setCursor(Qt.CursorShape.PointingHandCursor)
         card_layout.addWidget(header)
@@ -270,6 +271,8 @@ class MainWindow(QMainWindow):
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(10, 4, 10, 10)
         content_layout.setSpacing(6)
+        if collapsed:
+            content.setVisible(False)
         card_layout.addWidget(content)
 
         def toggle():
@@ -290,8 +293,21 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(6, 4, 4, 4)
         layout.setSpacing(6)
 
-        # 카메라 정보
-        cam_card, cam_lay = self._create_collapsible_card("카메라 정보")
+        # UI 새로고침 버튼
+        btn_ui_refresh = QPushButton("↻ 새로고침")
+        btn_ui_refresh.setFixedHeight(28)
+        btn_ui_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_ui_refresh.setStyleSheet("""
+            QPushButton { background: rgba(0,168,255,0.10); color: #38bdf8;
+                border: 1px solid rgba(0,168,255,0.25); border-radius: 6px;
+                font-size: 11px; font-weight: bold; }
+            QPushButton:hover { background: rgba(0,168,255,0.20); color: #7dd3fc; }
+        """)
+        btn_ui_refresh.clicked.connect(self._refresh_ui)
+        layout.addWidget(btn_ui_refresh)
+
+        # 카메라 정보 (기본 접힘)
+        cam_card, cam_lay = self._create_collapsible_card("카메라 정보", collapsed=True)
         self.lbl_cam_status = QLabel("연결 대기 중...")
         self.lbl_cam_status.setObjectName("statusError")
         self.lbl_cam_status.setWordWrap(True)
@@ -304,8 +320,8 @@ class MainWindow(QMainWindow):
         cam_lay.addWidget(self.lbl_cam_fps)
         layout.addWidget(cam_card)
 
-        # 감지 상태
-        det_card, det_lay = self._create_collapsible_card("감지 상태")
+        # 감지 상태 (기본 접힘)
+        det_card, det_lay = self._create_collapsible_card("감지 상태", collapsed=True)
         self.lbl_face_count = QLabel("감지된 얼굴: 0")
         self.lbl_face_count.setObjectName("subtitleLabel")
         det_lay.addWidget(self.lbl_face_count)
@@ -326,8 +342,8 @@ class MainWindow(QMainWindow):
         det_lay.addWidget(btn_reset)
         layout.addWidget(det_card)
 
-        # 녹화 상태 + 목록
-        rec_card, rec_lay = self._create_collapsible_card("녹화")
+        # 녹화 상태 + 목록 (기본 접힘)
+        rec_card, rec_lay = self._create_collapsible_card("녹화", collapsed=True)
         self.lbl_rec_status = QLabel("대기 중")
         self.lbl_rec_status.setObjectName("subtitleLabel")
         rec_lay.addWidget(self.lbl_rec_status)
@@ -936,6 +952,16 @@ class MainWindow(QMainWindow):
                 self.status_bar.showMessage(f"불량 캡처 {removed}개 자동 삭제됨")
                 if hasattr(self, '_visitor_view'):
                     self._visitor_view.refresh()
+
+    def _refresh_ui(self):
+        """가벼운 UI 새로고침 — 엔진 재시작 없이 화면만 갱신"""
+        self._update_kpi()
+        self._refresh_rec_list()
+        self.timeline.clear()
+        self._load_today_timeline()
+        if hasattr(self, '_visitor_view'):
+            self._visitor_view.refresh()
+        self.status_bar.showMessage("화면 새로고침 완료", 3000)
 
     # ═══════════════════════════════════════
     # 슬라이드 패널
