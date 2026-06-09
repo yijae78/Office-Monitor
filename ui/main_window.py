@@ -888,16 +888,21 @@ class MainWindow(QMainWindow):
         self.kpi_visitors.set_value(str(len(visits)))
         self.lbl_today_visitors.setText(f"오늘 방문자: {len(visits)}")
 
-        # 저장 용량
-        total = 0
-        for d in ["snapshots", "recordings"]:
-            path = os.path.join(DATA_DIR, d)
-            if os.path.exists(path):
-                for f in os.listdir(path):
-                    fp = os.path.join(path, f)
-                    if os.path.isfile(fp):
-                        total += os.path.getsize(fp)
-        mb = total / (1024 * 1024)
+        # 저장 용량 (6회에 1회만 디스크 스캔 — 약 30초마다)
+        self._storage_scan_counter = getattr(self, '_storage_scan_counter', 0) + 1
+        if self._storage_scan_counter >= 6 or not hasattr(self, '_cached_storage_mb'):
+            total = 0
+            for d in ["snapshots", "recordings"]:
+                path = os.path.join(DATA_DIR, d)
+                try:
+                    for f in os.scandir(path):
+                        if f.is_file():
+                            total += f.stat().st_size
+                except OSError:
+                    pass
+            self._cached_storage_mb = total / (1024 * 1024)
+            self._storage_scan_counter = 0
+        mb = self._cached_storage_mb
         self.kpi_storage.set_value(f"{mb:.0f} MB" if mb < 1024 else f"{mb/1024:.1f} GB")
 
     def _reset_today(self):
@@ -959,13 +964,9 @@ class MainWindow(QMainWindow):
             logger.warning("데이터 자동 정리 오류: %s", e)
 
     def _cleanup_bad_faces(self):
-        """불량 캡처 이미지 자동 삭제"""
+        """불량 캡처 정리를 감지 스레드에 위임 (메인 스레드 블로킹 방지)"""
         if self._detection_thread and self._detection_thread.isRunning():
-            removed = self._detection_thread.cleanup_bad_pending_faces()
-            if removed > 0:
-                self.status_bar.showMessage(f"불량 캡처 {removed}개 자동 삭제됨")
-                if hasattr(self, '_visitor_view'):
-                    self._visitor_view.refresh()
+            self._detection_thread.request_cleanup()
 
     def _refresh_ui(self):
         """가벼운 UI 새로고침 — 엔진 재시작 없이 화면만 갱신"""

@@ -6,12 +6,91 @@ import os
 import logging
 import cv2
 import numpy as np
+import multiprocessing as mp
+import queue as queue_mod
 from PyQt6.QtCore import QThread, pyqtSignal
 from insightface.app import FaceAnalysis
 import database
 from paths import PENDING_FACES_DIR, THUMBNAILS_DIR
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════
+# 추론 서브프로세스 (GIL 완전 분리)
+# ═══════════════════════════════════════════
+
+class _FaceProxy:
+    """서브프로세스 결과를 InsightFace face 객체처럼 사용"""
+    def __init__(self, data: dict):
+        self.bbox = np.array(data['bbox'], dtype=np.float32)
+        self.det_score = data['det_score']
+        self.embedding = data['embedding']
+        self.kps = np.array(data['kps']) if data.get('kps') is not None else None
+
+
+def _inference_loop(frame_q, result_q, stop_evt, model_name, det_size, score_thresh):
+    """별도 프로세스: YOLO + InsightFace 추론 (메인 프로세스 GIL과 무관)"""
+    import queue as _q
+    from insightface.app import FaceAnalysis as FA
+
+    app = FA(name=model_name, providers=["CPUExecutionProvider"])
+    app.prepare(ctx_id=-1, det_size=det_size)
+
+    yolo = None
+    try:
+        from ultralytics import YOLO
+        yolo = YOLO("yolo11n.pt")
+    except Exception:
+        pass
+
+    while not stop_evt.is_set():
+        try:
+            frame = frame_q.get(timeout=0.5)
+        except _q.Empty:
+            continue
+        if frame is None:
+            break
+
+        tracks = []
+        faces_data = []
+        has_yolo = yolo is not None
+
+        if has_yolo:
+            try:
+                tr = yolo.track(frame, classes=[0], persist=True,
+                                tracker="bytetrack.yaml", verbose=False,
+                                conf=0.4, iou=0.5)
+                if tr and tr[0].boxes is not None and len(tr[0].boxes):
+                    bxs = tr[0].boxes
+                    for i in range(len(bxs)):
+                        bbox = bxs.xyxy[i].cpu().numpy().astype(int).tolist()
+                        conf = float(bxs.conf[i].cpu())
+                        tid = int(bxs.id[i].cpu()) if bxs.id is not None else -1
+                        tracks.append((tid, bbox, conf))
+            except Exception:
+                has_yolo = False
+
+        if tracks or not has_yolo:
+            try:
+                for face in app.get(frame):
+                    if face.det_score < score_thresh:
+                        continue
+                    faces_data.append({
+                        'bbox': face.bbox.astype(int).tolist(),
+                        'det_score': float(face.det_score),
+                        'embedding': face.embedding.copy() if face.embedding is not None else None,
+                        'kps': face.kps.copy() if hasattr(face, 'kps') and face.kps is not None else None,
+                    })
+            except Exception:
+                pass
+
+        # 최신 결과만 유지
+        try:
+            result_q.get_nowait()
+        except _q.Empty:
+            pass
+        result_q.put({'tracks': tracks, 'faces': faces_data, 'has_yolo': has_yolo})
 
 
 class DetectionThread(QThread):
@@ -54,8 +133,7 @@ class DetectionThread(QThread):
         self._cooldown = det_cfg.get("cooldown_seconds", 300)
         self._auto_augment = det_cfg.get("auto_augment_embeddings", True)
 
-        self._app = None        # InsightFace
-        self._yolo = None       # YOLO11n
+        self._app = None        # InsightFace (등록/검증 전용)
         self._known_faces = {}  # {visitor_id: {"name", "embeddings": [...]}}
         self._cooldown_map = {}
         self._new_face_cooldown = {}
@@ -81,6 +159,13 @@ class DetectionThread(QThread):
         self._recent_log_embeddings = []  # [(embedding, name, timestamp)]
 
         self._reset_requested = False  # 스레드 안전 리셋 플래그
+        self._cleanup_requested = False
+
+        # 추론 서브프로세스
+        self._frame_q = mp.Queue(maxsize=2)
+        self._result_q = mp.Queue(maxsize=2)
+        self._stop_evt = mp.Event()
+        self._inference_proc = None
 
         # 임베딩 행렬 캐시 (고속 매칭용)
         self._known_matrix = None    # (N, 512) ndarray
@@ -90,25 +175,37 @@ class DetectionThread(QThread):
     def set_frame(self, frame: np.ndarray):
         with self._frame_lock:
             self._frame = frame
+        # 서브프로세스에 최신 프레임 전달 (오래된 것 버림)
+        try:
+            self._frame_q.get_nowait()
+        except Exception:
+            pass
+        try:
+            self._frame_q.put_nowait(frame.copy())
+        except Exception:
+            pass
 
     def run(self):
         self._running = True
 
+        # 추론 서브프로세스 시작 (GIL 완전 분리)
+        self._stop_evt.clear()
+        self._inference_proc = mp.Process(
+            target=_inference_loop,
+            args=(self._frame_q, self._result_q, self._stop_evt,
+                  self._model_name, self._det_size, self._score_threshold),
+            daemon=True,
+        )
+        self._inference_proc.start()
+        logger.info("추론 서브프로세스 시작 (PID: %s)", self._inference_proc.pid)
+
+        # 로컬 InsightFace (등록/검증 전용 — 추론과 별개)
         try:
-            # InsightFace 초기화
             self._app = FaceAnalysis(name=self._model_name, providers=["CPUExecutionProvider"])
             self._app.prepare(ctx_id=-1, det_size=self._det_size)
         except Exception as e:
-            logger.error("InsightFace 초기화 실패: %s", e)
-            return
-
-        # YOLO 초기화
-        try:
-            from ultralytics import YOLO
-            self._yolo = YOLO("yolo11n.pt")
-        except Exception as e:
-            logger.warning("YOLO 로드 실패 (폴백 모드): %s", e)
-            self._yolo = None
+            logger.error("InsightFace 로컬 초기화 실패: %s", e)
+            self._app = None
 
         self._load_known_faces()
         self._load_pending_embeddings()
@@ -116,17 +213,30 @@ class DetectionThread(QThread):
         while self._running:
             if self._reset_requested:
                 self._do_reset()
+            if self._cleanup_requested:
+                self._cleanup_requested = False
+                self._do_cleanup_bad_faces()
+
+            # 서브프로세스 결과 수신
+            try:
+                result = self._result_q.get(timeout=0.2)
+            except Exception:
+                continue
 
             try:
                 with self._frame_lock:
                     frame = self._frame
-
                 if frame is not None:
-                    self._detect(frame)
+                    now = time.time()
+                    tracks = result['tracks']
+                    all_faces = [_FaceProxy(fd) for fd in result['faces']]
+                    if result.get('has_yolo', True):
+                        self._detect_with_tracking(frame, now, tracks, all_faces)
+                    else:
+                        self._detect_face_only(frame, now, all_faces)
+                    self._finalize_candidates(now)
             except Exception as e:
-                logger.error("감지 루프 오류: %s", e)
-
-            time.sleep(self._interval)
+                logger.error("감지 처리 오류: %s", e)
 
     def _load_known_faces(self):
         self._known_faces = {}
@@ -174,30 +284,13 @@ class DetectionThread(QThread):
         self._recent_log_embeddings.clear()
         self._new_face_cooldown.clear()
         self._capture_candidates.clear()
-        # YOLO ByteTrack 리셋: predictor 초기화 → 다음 track()에서 재생성
-        if self._yolo is not None:
-            try:
-                self._yolo.predictor = None
-            except Exception:
-                pass
+        # ByteTrack은 서브프로세스에 있으므로 track 매핑만 초기화
         self._reset_requested = False
         logger.info("추적 캐시 리셋 완료")
 
     def reload_known_faces(self):
         self._load_known_faces()
         self._load_pending_embeddings()
-
-    def _detect(self, frame: np.ndarray):
-        """통합 감지 파이프라인"""
-        now = time.time()
-
-        if self._yolo is not None:
-            self._detect_with_tracking(frame, now)
-        else:
-            self._detect_face_only(frame, now)
-
-        # 수집 시간이 지난 후보를 확정하여 저장
-        self._finalize_candidates(now)
 
     def _is_frontal_enough(self, face) -> bool:
         """얼굴이 신원 매칭에 충분히 정면인지 확인 (측면/뒷모습 오인식 방지)
@@ -218,43 +311,18 @@ class DetectionThread(QThread):
         nose_offset_x = abs(nose[0] - (left_eye[0] + right_eye[0]) / 2) / eye_dist
         return nose_offset_x < 0.45
 
-    def _detect_with_tracking(self, frame: np.ndarray, now: float):
-        """YOLO + ByteTrack + InsightFace 통합 파이프라인
+    def _detect_with_tracking(self, frame: np.ndarray, now: float,
+                              tracks: list, all_faces: list):
+        """서브프로세스에서 받은 추론 결과를 처리 (매칭/로깅/캡처)"""
+        active_track_ids = set()
+        for tid, _, _ in tracks:
+            active_track_ids.add(tid)
 
-        개선: InsightFace를 전체 프레임에서 1회 실행 후
-        각 얼굴을 YOLO track에 공간 매칭 → 크롭 오염 방지
-        """
-        # 1단계: YOLO 사람 감지 + ByteTrack 추적
-        try:
-            track_results = self._yolo.track(
-                frame, classes=[0], persist=True,
-                tracker="bytetrack.yaml", verbose=False,
-                conf=0.4, iou=0.5,
-            )
-        except Exception:
-            self._detect_face_only(frame, now)
+        if not tracks:
+            self.faces_detected.emit([])
             return
 
-        tracks = []  # [(track_id, person_bbox, conf)]
-        active_track_ids = set()
-
-        if track_results and track_results[0].boxes is not None and len(track_results[0].boxes):
-            boxes = track_results[0].boxes
-            for i in range(len(boxes)):
-                bbox = boxes.xyxy[i].cpu().numpy().astype(int).tolist()
-                conf = float(boxes.conf[i].cpu())
-                track_id = int(boxes.id[i].cpu()) if boxes.id is not None else -1
-                active_track_ids.add(track_id)
-                tracks.append((track_id, bbox, conf))
-
-        # 2단계: InsightFace 전체 프레임에서 1회 실행
-        all_faces = []
-        try:
-            all_faces = self._app.get(frame)
-        except Exception as e:
-            logger.debug("InsightFace 전체 프레임 감지 오류: %s", e)
-
-        # 3단계: 각 얼굴 → 가장 가까운 YOLO person bbox에 1:1 매칭
+        # 각 얼굴 → 가장 가까운 YOLO person bbox에 1:1 매칭
         track_face = {}  # track_id → face 객체
         for face in all_faces:
             if face.det_score < self._score_threshold:
@@ -426,18 +494,18 @@ class DetectionThread(QThread):
 
         self.faces_detected.emit(results)
 
-    def _detect_face_only(self, frame: np.ndarray, now: float):
+    def _detect_face_only(self, frame: np.ndarray, now: float,
+                          faces: list = None):
         """YOLO 없이 InsightFace만 사용하는 폴백 모드"""
-        try:
-            faces = self._app.get(frame)
-        except Exception as e:
-            logger.debug("InsightFace 폴백 감지 오류: %s", e)
-            return
+        if faces is None:
+            try:
+                faces = self._app.get(frame)
+            except Exception as e:
+                logger.debug("InsightFace 폴백 감지 오류: %s", e)
+                return
 
         results = []
         for face in faces:
-            if face.det_score < self._score_threshold:
-                continue
 
             bbox = face.bbox.astype(int).tolist()
             embedding = face.embedding
@@ -831,6 +899,16 @@ class DetectionThread(QThread):
                 removed += 1
         return removed
 
+    def request_cleanup(self):
+        """메인 스레드에서 호출 — 감지 스레드 내부에서 안전하게 실행"""
+        self._cleanup_requested = True
+
+    def _do_cleanup_bad_faces(self):
+        """감지 스레드 내부에서 실행 — 불량 캡처 정리"""
+        removed = self.cleanup_bad_pending_faces()
+        if removed > 0:
+            logger.info("불량 캡처 %d개 자동 삭제됨", removed)
+
     def _save_thumbnail(self, frame: np.ndarray, bbox: list) -> str:
         h, w = frame.shape[:2]
         x1 = max(0, bbox[0] - 20)
@@ -891,4 +969,14 @@ class DetectionThread(QThread):
 
     def stop(self):
         self._running = False
+        # 서브프로세스 종료
+        self._stop_evt.set()
+        try:
+            self._frame_q.put_nowait(None)  # poison pill
+        except Exception:
+            pass
+        if self._inference_proc and self._inference_proc.is_alive():
+            self._inference_proc.join(timeout=5)
+            if self._inference_proc.is_alive():
+                self._inference_proc.terminate()
         self.wait(3000)
