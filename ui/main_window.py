@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
         self._panel_width = 260
         self._top_panel_expanded = True
         self._last_polled_ts = 0.0
+        self._detection_active = True  # 감지 ON/OFF 상태
 
         self.setWindowTitle("OfficeMonitor")
         self.setMinimumSize(400, 300)
@@ -180,6 +181,14 @@ class MainWindow(QMainWindow):
         self.btn_capture.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.btn_capture.clicked.connect(self._capture_snapshot)
 
+        # 감지 ON/OFF 토글 버튼
+        self.btn_detection_toggle = QPushButton("🔍 감지 ON")
+        self.btn_detection_toggle.setObjectName("btnDetectionToggle")
+        self.btn_detection_toggle.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.btn_detection_toggle.setToolTip("실시간 얼굴 감지 ON/OFF (CPU 절약)")
+        self._apply_detection_btn_style(True)
+        self.btn_detection_toggle.clicked.connect(self._toggle_detection)
+
         # 줌 버튼
         btn_zoom_out = QPushButton("-")
         btn_zoom_out.setObjectName("zoomBtn")
@@ -218,6 +227,8 @@ class MainWindow(QMainWindow):
         tb_layout.addWidget(self.btn_pause)
         tb_layout.addSpacing(12)
         tb_layout.addWidget(self.btn_capture)
+        tb_layout.addSpacing(12)
+        tb_layout.addWidget(self.btn_detection_toggle)
         tb_layout.addStretch()
         tb_layout.addWidget(btn_zoom_out)
         tb_layout.addWidget(self._lbl_zoom)
@@ -501,9 +512,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_lbl_zoom'):
             self._lbl_zoom.setText(f"{self.camera_widget._zoom:.1f}×")
 
-        # 감지/녹화 스레드에 프레임 전달
-        if self._detection_thread:
+        # 감지 스레드에 프레임 전달 (감지 ON일 때만)
+        if self._detection_active and self._detection_thread:
             self._detection_thread.set_frame(frame)
+        # 녹화 스레드에 프레임 전달
         if self._recording_thread:
             self._recording_thread.set_frame(frame)
 
@@ -538,6 +550,48 @@ class MainWindow(QMainWindow):
                 winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
             except Exception:
                 pass
+
+    # ═══════════════════════════════════════
+    # 감지 ON/OFF 토글
+    # ═══════════════════════════════════════
+
+    def _apply_detection_btn_style(self, is_on: bool):
+        """감지 버튼 스타일 적용 — ON=녹색, OFF=빨간색"""
+        if is_on:
+            self.btn_detection_toggle.setText("🔍 감지 ON")
+            self.btn_detection_toggle.setStyleSheet("""
+                QPushButton {
+                    background: rgba(34,197,94,0.15); color: #34d399;
+                    border: 2px solid rgba(34,197,94,0.4); border-radius: 6px;
+                    padding: 4px 10px; font-weight: bold; font-size: 12px;
+                }
+                QPushButton:hover { background: rgba(34,197,94,0.25); }
+            """)
+        else:
+            self.btn_detection_toggle.setText("🔍 감지 OFF")
+            self.btn_detection_toggle.setStyleSheet("""
+                QPushButton {
+                    background: rgba(239,68,68,0.15); color: #f87171;
+                    border: 2px solid rgba(239,68,68,0.4); border-radius: 6px;
+                    padding: 4px 10px; font-weight: bold; font-size: 12px;
+                }
+                QPushButton:hover { background: rgba(239,68,68,0.25); }
+            """)
+
+    def _toggle_detection(self):
+        """실시간 감지 ON/OFF — OFF 시 프레임 전달만 차단 (스레드는 유지, 자연 아이들)"""
+        self._detection_active = not self._detection_active
+        self._apply_detection_btn_style(self._detection_active)
+
+        if self._detection_active:
+            self.status_bar.showMessage("실시간 감지 ON")
+            ToastWidget.show_toast(self, "감지 ON — 실시간 모니터링 시작", True)
+        else:
+            self.camera_widget.update_detections([])
+            self.lbl_face_count.setText("감지된 얼굴: -")
+            self.kpi_faces.set_value("-")
+            self.status_bar.showMessage("실시간 감지 OFF — CPU 절약 모드")
+            ToastWidget.show_toast(self, "감지 OFF — CPU 절약 모드", True)
 
     # ═══════════════════════════════════════
     # 캡처 / 녹화
