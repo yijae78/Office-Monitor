@@ -579,19 +579,40 @@ class MainWindow(QMainWindow):
             """)
 
     def _toggle_detection(self):
-        """실시간 감지 ON/OFF — OFF 시 프레임 전달만 차단 (스레드는 유지, 자연 아이들)"""
+        """실시간 감지 ON/OFF — OFF 시 감지 스레드만 중지 (카메라 화면은 유지)"""
         self._detection_active = not self._detection_active
         self._apply_detection_btn_style(self._detection_active)
 
         if self._detection_active:
+            # 감지 스레드 재시작 (카메라는 이미 실행 중)
+            self._restart_detection()
             self.status_bar.showMessage("실시간 감지 ON")
             ToastWidget.show_toast(self, "감지 ON — 실시간 모니터링 시작", True)
         else:
+            # 감지 스레드만 중지 (카메라·프레임 폴링은 유지)
+            self._stop_detection()
             self.camera_widget.update_detections([])
             self.lbl_face_count.setText("감지된 얼굴: -")
             self.kpi_faces.set_value("-")
             self.status_bar.showMessage("실시간 감지 OFF — CPU 절약 모드")
             ToastWidget.show_toast(self, "감지 OFF — CPU 절약 모드", True)
+
+    def _stop_detection(self):
+        """감지 스레드만 종료하여 CPU 해방 (카메라는 유지)"""
+        if self._detection_thread:
+            self._detection_thread.stop()
+            self._detection_thread = None
+
+    def _restart_detection(self):
+        """감지 스레드를 다시 생성하여 시작"""
+        from detection_engine import DetectionThread
+
+        if not self._detection_thread:
+            self._detection_thread = DetectionThread(self.config)
+            self._detection_thread.faces_detected.connect(self._on_faces_detected)
+            self._detection_thread.visit_logged.connect(self._on_visit_logged)
+            self._detection_thread.face_captured.connect(self._on_face_captured)
+            self._detection_thread.start()
 
     # ═══════════════════════════════════════
     # 캡처 / 녹화
